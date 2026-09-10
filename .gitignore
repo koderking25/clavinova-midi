@@ -1,0 +1,10 @@
+# Python environment (setup.sh rebuilds it from requirements.lock)
+.venv/
+__pycache__/
+*.pyc
+
+# Per-machine data: temporary conversion files, error logs, request cooldowns
+work/
+state/
+
+.DS_Store

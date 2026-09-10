@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clavinova MIDI Maker</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎹</text></svg>">
+<style>
+:root {
+  --bg: #f5f1e8; --card: #fffdf8; --ink: #1d1b17; --muted: #6c655a; --line: #e3dac9;
+  --accent: #9b2c1f; --accent-soft: #f6e3de; --accent-ink: #ffffff;
+  --ok: #2d6a39; --ok-soft: #e1efe2; --warn: #8a5d00; --warn-soft: #f8ecd0; --bad: #a3261c; --bad-soft: #f8e0dc;
+  --key-w: #fffdf8; --key-b: #1d1b17;
+  --radius: 14px; --shadow: 0 1px 2px rgba(40,30,10,.06), 0 4px 16px rgba(40,30,10,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171512; --card: #211e1a; --ink: #f1ece3; --muted: #a79f92; --line: #3a352e;
+    --accent: #e0695a; --accent-soft: #3a2320; --accent-ink: #1a0f0d;
+    --ok: #7fc98c; --ok-soft: #1f3322; --warn: #e5b85a; --warn-soft: #3a2f17; --bad: #f08a7e; --bad-soft: #3b201d;
+    --key-w: #e9e3d8; --key-b: #0d0c0a; --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+.keys { height: 26px; background:
+  repeating-linear-gradient(90deg, transparent 0 21px, var(--line) 21px 22px),
+  var(--key-w); position: relative; overflow: hidden; border-bottom: 1px solid var(--line); }
+.keys::after { content: ""; position: absolute; inset: 0 0 9px 0; background:
+  repeating-linear-gradient(90deg,
+   transparent 0 15px, var(--key-b) 15px 28px, transparent 28px 37px, var(--key-b) 37px 50px, transparent 50px 81px,
+   var(--key-b) 81px 94px, transparent 94px 103px, var(--key-b) 103px 116px, transparent 116px 125px, var(--key-b) 125px 138px, transparent 138px 154px); }
+header { max-width: 880px; margin: 0 auto; padding: 28px 20px 8px; }
+h1 { font: 600 30px/1.15 ui-serif, "New York", Georgia, serif; margin: 0 0 6px; letter-spacing: -.01em; }
+.sub { color: var(--muted); margin: 0; }
+main { max-width: 880px; margin: 0 auto; padding: 8px 20px 40px; display: grid; gap: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow); }
+.card h2 { font: 600 13px/1.2 -apple-system, system-ui, sans-serif; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.grow { flex: 1 1 auto; min-width: 0; }
+button, .btn { font: inherit; font-weight: 600; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  padding: 8px 14px; border-radius: 10px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+button:hover:not(:disabled), .btn:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.primary:hover:not(:disabled) { filter: brightness(1.07); border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.small, .btn.small { padding: 5px 10px; font-size: 13px; border-radius: 8px; }
+button.link { border: 0; background: none; padding: 0; color: var(--muted); font-weight: 500; text-decoration: underline; }
+input[type=search], select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+input[type=search] { width: 100%; font-size: 17px; }
+input[type=search]:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.mode { border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px; cursor: pointer; background: var(--bg); }
+.mode input { position: absolute; opacity: 0; pointer-events: none; }
+.mode b { display: block; margin-bottom: 3px; }
+.mode span { color: var(--muted); font-size: 13.5px; }
+.mode:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.mode:has(input:focus-visible) { outline: 2px solid var(--accent); }
+.tag { white-space: nowrap; display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; background: var(--ok-soft); color: var(--ok); margin-left: 6px; vertical-align: 2px; }
+.opts { margin-top: 12px; color: var(--muted); font-size: 14px; }
+.opts label { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; }
+.results { margin-top: 14px; display: grid; gap: 8px; }
+.res { display: grid; grid-template-columns: 120px 1fr auto; gap: 12px; align-items: center; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
+.res img { width: 120px; aspect-ratio: 16/9; object-fit: cover; border-radius: 7px; background: var(--line); display: block; }
+.res .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.meta { color: var(--muted); font-size: 13px; }
+.bitmidi { border: 1px dashed var(--line); border-radius: 12px; padding: 10px 14px; background: var(--bg); }
+.bitmidi ul { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.bitmidi a { color: var(--accent); font-weight: 600; }
+.drop { border: 2px dashed var(--line); border-radius: var(--radius); padding: 26px 20px; text-align: center; color: var(--muted); background: var(--card); cursor: pointer; transition: border-color .15s, background .15s; }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+.drop b { color: var(--ink); font-size: 16px; }
+.job { padding: 12px 0; border-top: 1px solid var(--line); }
+.job:first-of-type { border-top: 0; padding-top: 0; }
+.bar { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; margin: 8px 0 4px; }
+.bar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .6s ease; }
+.msg { padding: 10px 12px; border-radius: 10px; font-size: 14px; margin-top: 8px; }
+.msg.bad { background: var(--bad-soft); color: var(--bad); }
+.msg.warn { background: var(--warn-soft); color: var(--warn); }
+.msg.ok { background: var(--ok-soft); color: var(--ok); }
+.song { padding: 12px 0; border-top: 1px solid var(--line); }
+.song:first-of-type { border-top: 0; padding-top: 0; }
+.song.new { animation: glow 2.4s ease; }
+@keyframes glow { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
+.song .t { font-weight: 600; }
+.song audio { width: 100%; margin-top: 8px; height: 36px; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.drive { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; border: 1.5px solid var(--line); background: var(--bg); cursor: pointer; }
+.drive.sel { border-color: var(--accent); }
+.dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; flex: none; }
+.dot.good { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+.empty { color: var(--muted); font-size: 14px; }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-weight: 600; box-shadow: 0 6px 24px rgba(0,0,0,.25); max-width: min(92vw, 560px); z-index: 9; }
+.banner { max-width: 880px; margin: 8px auto 0; padding: 0 20px; }
+footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 13px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.hint { color: var(--muted); font-size: 13.5px; margin: 10px 0 0; }
+@media (max-width: 560px) { .res { grid-template-columns: 84px 1fr; } .res img { width: 84px; } .res button { grid-column: 1 / -1; } }
+</style>
+</head>
+<body>
+<div class="keys" aria-hidden="true"></div>
+<header>
+  <h1>Clavinova MIDI Maker</h1>
+  <p class="sub">Type a song or drop in a recording. Get a MIDI file your CVP-503 can play from a flash drive.</p>
+</header>
+<div class="banner" id="banner"></div>
+
+<main>
+  <section class="card" aria-labelledby="how-h">
+    <h2 id="how-h">1. How should it sound?</h2>
+    <div class="modes" role="radiogroup">
+      <label class="mode"><input type="radio" name="mode" value="arrange"><b>Piano version <span class="tag">Best for most songs</span></b><span>Any song turned into piano. The drums are taken out, the instruments become piano, and the sung melody goes in the right hand.</span></label>
+      <label class="mode"><input type="radio" name="mode" value="piano"><b>Solo piano recording</b><span>The most accurate. Use it when the recording is only a piano, like a piano cover or a classical piece.</span></label>
+      <label class="mode"><input type="radio" name="mode" value="band"><b>Full band</b><span>Melody, chords, bass and drums each get their own Clavinova part. More experimental.</span></label>
+    </div>
+    <div class="opts" id="opt-split"><label><input type="checkbox" id="split"> Put the left and right hand on separate parts, so you can turn one off on the Clavinova and play it yourself</label></div>
+    <div class="opts" id="opt-melody" hidden><label>Melody instrument <select id="melody"></select></label></div>
+  </section>
+
+  <section class="card" aria-labelledby="find-h">
+    <h2 id="find-h">2. Find a song</h2>
+    <form class="row" id="search-form" autocomplete="off">
+      <div class="grow"><input type="search" id="q" placeholder="Song name and artist, like: Clair de Lune Debussy piano" aria-label="Song name"></div>
+      <button class="primary" id="search-btn">Search</button>
+    </form>
+    <p class="hint">Tip: adding the word "piano" finds piano covers, which turn into the cleanest MIDI files.</p>
+    <div id="results"></div>
+  </section>
+
+  <label class="drop" id="drop" for="file">
+    <input type="file" id="file" multiple hidden accept="audio/*,video/*,.mid,.midi,.kar,.mp3,.m4a,.wav,.flac,.aiff,.aif,.ogg,.opus,.webm,.mp4,.mov">
+    <b>Or drop an audio file here</b><br>
+    MP3, M4A, WAV, FLAC and most other formats. Drop a .mid file (like one from BitMidi) to add it to your songs and send it to your flash drive.
+  </label>
+
+  <section class="card" id="jobs-card" hidden aria-labelledby="jobs-h">
+    <h2 id="jobs-h">Working on it</h2>
+    <div id="jobs"></div>
+  </section>
+
+  <section class="card" aria-labelledby="drive-h">
+    <h2 id="drive-h">Flash drive</h2>
+    <div id="drives"><p class="empty">Looking for flash drives...</p></div>
+  </section>
+
+  <section class="card" aria-labelledby="lib-h">
+    <h2 id="lib-h">Your songs</h2>
+    <div id="library"><p class="empty">Loading...</p></div>
+    <p class="hint">Previews play through your Mac's built-in sounds, so they are rough. The Clavinova sounds much better.
+      On the Clavinova, plug the flash drive into its USB port and pick the song from the USB tab of the song list.</p>
+  </section>
+</main>
+
+<footer>
+  <span id="st-models">Getting ready...</span>
+  <span id="st-disk"></span>
+  <span id="st-ytdlp"></span>
+  <button class="link" id="update-btn">Update downloader</button>
+  <button class="link" id="lib-btn">Open songs folder</button>
+</footer>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const store = { get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+const MODE_NAMES = { arrange: "Piano version", piano: "Solo piano", band: "Full band", imported: "From a MIDI file" };
+const S = { mode: store.get("mode", "arrange"), split: store.get("split", true), melody: store.get("melody", 73),
+            drives: [], drive: store.get("drive", null), jobs: [], seenDone: new Set(), highlight: null, status: {} };
+
+async function api(path, opts = {}) {
+  const o = { ...opts, headers: { ...(opts.headers || {}) } };
+  if (o.method && o.method !== "GET") o.headers["x-clavinova"] = "1";
+  if (o.json !== undefined) { o.body = JSON.stringify(o.json); o.headers["content-type"] = "application/json"; delete o.json; }
+  let r;
+  try { r = await fetch(path, o); } catch { throw new Error("The app is not running. Double-click Clavinova MIDI Maker to start it again."); }
+  let data = null; try { data = await r.json(); } catch {}
+  if (!r.ok) throw new Error((data && (data.detail || data.error)) || `Something went wrong (${r.status}).`);
+  return data;
+}
+let toastT;
+function toast(text, ms = 3200) {
+  let t = $(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); document.body.append(t); }
+  t.textContent = text; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), ms);
+}
+const fmtDur = s => { if (!s && s !== 0) return ""; s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const fmtEta = s => s == null ? "" : s < 50 ? "less than a minute left" : `about ${Math.round(s / 60)} min left`;
+const fmtGB = b => (b / 1e9).toFixed(1) + " GB";
+
+/* ---------- mode picker ---------- */
+function initModes() {
+  document.querySelectorAll("input[name=mode]").forEach(r => {
+    r.checked = r.value === S.mode;
+    r.addEventListener("change", () => { S.mode = r.value; store.set("mode", S.mode); syncOpts(); });
+  });
+  $("#split").checked = !!S.split;
+  $("#split").addEventListener("change", e => { S.split = e.target.checked; store.set("split", S.split); });
+  $("#melody").addEventListener("change", e => { S.melody = +e.target.value; store.set("melody", S.melody); });
+  syncOpts();
+}
+function syncOpts() { $("#opt-split").hidden = S.mode === "band"; $("#opt-melody").hidden = S.mode !== "band"; }
+function fillMelody(progs) {
+  const sel = $("#melody"); if (sel.options.length) return;
+  for (const [k, v] of Object.entries(progs)) sel.add(new Option(v, k));
+  if (!progs[String(S.melody)]) S.melody = 73;
+  sel.value = String(S.melody);
+}
+
+/* ---------- search ---------- */
+// YouTube and BitMidi are asked separately, so a slow BitMidi never holds up the YouTube results.
+S.searchToken = 0;
+$("#search-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const q = $("#q").value.trim(); if (q.length < 2) { $("#q").focus(); return; }
+  const token = ++S.searchToken;
+  const btn = $("#search-btn"); btn.disabled = true; btn.textContent = "Searching...";
+  $("#results").innerHTML = `<div id="bm-box"></div><div id="yt-box"><p class="empty">Searching YouTube...</p></div>`;
+  const enc = encodeURIComponent(q);
+  api(`/api/search/bitmidi?q=${enc}`).then(d => { if (token === S.searchToken) renderBitmidi(d); }).catch(() => {});
+  try { const d = await api(`/api/search/youtube?q=${enc}`); if (token === S.searchToken) renderYouTube(d); }
+  catch (err) { if (token === S.searchToken) $("#yt-box").innerHTML = `<div class="msg bad">${esc(err.message)}</div>`; }
+  finally { if (token === S.searchToken) { btn.disabled = false; btn.textContent = "Search"; } }
+});
+function renderBitmidi(d) {
+  const box = $("#bm-box"); if (!box || !d.results.length) return;
+  box.className = "bitmidi"; box.style.marginTop = "14px";
+  box.innerHTML = `<b>Already a MIDI file on BitMidi</b> <span class="meta">(made by a person, usually better than automatic)</span>
+    <ul>${d.results.map(m => `<li><a href="${esc(m.page)}" target="_blank" rel="noopener">${esc(m.name)}</a> <span class="meta">${Number(m.plays || 0).toLocaleString()} plays</span></li>`).join("")}</ul>
+    <p class="hint" style="margin-top:6px">Download it on BitMidi, then drop the .mid file below to send it to your flash drive.</p>`;
+}
+function renderYouTube(d) {
+  const box = $("#yt-box"); if (!box) return; box.innerHTML = "";
+  if (d.error) box.innerHTML = `<div class="msg warn">${esc(d.error)}</div>`;
+  const list = document.createElement("div"); list.className = "results";
+  if (d.results.length) {
+    const h = document.createElement("p"); h.className = "meta"; h.style.margin = "4px 0 0";
+    h.textContent = "Make a MIDI from one of these recordings:"; list.append(h);
+  }
+  for (const v of d.results) {
+    const el = document.createElement("div"); el.className = "res";
+    el.innerHTML = `<img src="${esc(v.thumb)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+      <div style="min-width:0"><div class="t">${esc(v.title)}</div><div class="meta">${esc(v.channel)}${v.duration ? " · " + fmtDur(v.duration) : ""}${v.too_long ? " · too long (15 min max)" : ""}</div></div>`;
+    const b = document.createElement("button"); b.className = "primary"; b.textContent = "Make MIDI"; b.disabled = v.too_long;
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try {
+        await api("/api/jobs", { method: "POST", json: { video_id: v.id, title: v.title, duration: v.duration, mode: S.mode, melody_program: +S.melody, split_hands: !!S.split } });
+        b.textContent = "Added"; toast(`Making "${v.title}". This takes a few minutes.`); refreshJobs(true);
+      } catch (err) { b.disabled = false; toast(err.message, 6000); }
+    });
+    el.append(b); list.append(el);
+  }
+  box.append(list);
+  if (!d.results.length && !d.error) box.innerHTML = `<p class="empty">No recordings found. Try different words.</p>`;
+}
+
+/* ---------- drop / upload ---------- */
+const drop = $("#drop");
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", e => e.preventDefault());
+drop.addEventListener("drop", e => [...(e.dataTransfer?.files || [])].forEach(uploadFile));
+$("#file").addEventListener("change", e => { [...e.target.files].forEach(uploadFile); e.target.value = ""; });
+
+function uploadFile(file) {
+  const fd = new FormData();
+  fd.append("file", file); fd.append("mode", S.mode); fd.append("melody_program", S.melody); fd.append("split_hands", S.split ? "true" : "false");
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/upload"); xhr.setRequestHeader("x-clavinova", "1");
+  toast(`Uploading "${file.name}"...`, 60000);
+  xhr.upload.onprogress = e => { if (e.lengthComputable) toast(`Uploading "${file.name}": ${Math.round(100 * e.loaded / e.total)}%`, 60000); };
+  xhr.onload = () => {
+    let d = {}; try { d = JSON.parse(xhr.responseText); } catch {}
+    if (xhr.status >= 400) { toast(d.detail || "That file could not be added.", 7000); return; }
+    if (d.imported) { S.highlight = d.imported; toast(`Added "${d.imported}" to your songs.`); refreshLibrary(); }
+    else { toast(`Making "${file.name}". This takes a few minutes.`); refreshJobs(true); }
+  };
+  xhr.onerror = () => toast("Upload failed. Is the app still running?", 7000);
+  xhr.send(fd);
+}
+
+/* ---------- jobs ---------- */
+let jobTimer;
+async function refreshJobs(soon) {
+  clearTimeout(jobTimer);
+  try {
+    S.jobs = await api("/api/jobs");
+    for (const j of S.jobs) if (j.status === "done" && !S.seenDone.has(j.id)) {
+      S.seenDone.add(j.id);
+      if (j.result) { S.highlight = j.result.file; refreshLibrary(); }
+    }
+    renderJobs();
+  } catch {}
+  const active = S.jobs.some(j => j.status === "running" || j.status === "queued");
+  jobTimer = setTimeout(refreshJobs, active || soon ? 1000 : 5000);
+}
+const dismissed = new Set(store.get("dismissed", []));
+function renderJobs() {
+  const shown = S.jobs.filter(j => !dismissed.has(j.id) && Date.now() / 1000 - j.created < 6 * 3600);
+  $("#jobs-card").hidden = !shown.length;
+  const box = $("#jobs"); box.innerHTML = "";
+  for (const j of shown) {
+    const el = document.createElement("div"); el.className = "job";
+    const pct = Math.round((j.status === "done" ? 1 : j.progress) * 100);
+    let body = "";
+    if (j.status === "running") body = `<div class="bar"><i style="width:${pct}%"></i></div><div class="meta">${esc(j.stage)} · ${pct}% · ${fmtEta(j.eta)}</div>`;
+    else if (j.status === "queued") body = `<div class="meta">Waiting for the song before it to finish.</div>`;
+    else if (j.status === "done") body = `<div class="msg ok">Done. It is in "Your songs" below.</div>`;
+    else if (j.status === "cancelled") body = `<div class="meta">Cancelled.</div>`;
+    else if (j.status === "error") body = `<div class="msg bad">${esc(j.error)}</div>`;
+    el.innerHTML = `<div class="row"><div class="grow"><b>${esc(j.title)}</b> <span class="meta">${esc(MODE_NAMES[j.mode] || j.mode)}</span></div></div>${body}`;
+    const row = el.firstElementChild;
+    if (j.status === "running" || j.status === "queued") {
+      const c = document.createElement("button"); c.className = "small"; c.textContent = "Cancel";
+      c.onclick = async () => { c.disabled = true; try { await api(`/api/jobs/${j.id}/cancel`, { method: "POST" }); refreshJobs(true); } catch (e) { toast(e.message); } };
+      row.append(c);
+    } else {
+      const x = document.createElement("button"); x.className = "small"; x.textContent = "Hide"; x.setAttribute("aria-label", "Hide this message");
+      x.onclick = () => { dismissed.add(j.id); store.set("dismissed", [...dismissed].slice(-100)); renderJobs(); };
+      row.append(x);
+    }
+    box.append(el);
+  }
+}
+
+/* ---------- library ---------- */
+async function refreshLibrary() {
+  let items;
+  try { items = await api("/api/library"); } catch (e) { $("#library").innerHTML = `<div class="msg bad">${esc(e.message)}</div>`; return; }
+  const box = $("#library"); box.innerHTML = "";
+  if (!items.length) { box.innerHTML = `<p class="empty">No songs yet. Search for one above or drop in a file.</p>`; return; }
+  for (const it of items) {
+    const el = document.createElement("div"); el.className = "song" + (it.file === S.highlight ? " new" : "");
+    const parts = (it.parts || []).map(p => `${p.name} (${p.notes})`).join(", ");
+    el.innerHTML = `<div class="t">${esc(it.title)}</div>
+      <div class="meta">${esc(it.file)} · ${esc(MODE_NAMES[it.mode] || "MIDI")}${it.seconds ? " · " + fmtDur(it.seconds) : ""}${it.bpm ? " · " + Math.round(it.bpm) + " BPM" : ""}${parts ? " · " + esc(parts) : ""}</div>`;
+    const acts = document.createElement("div"); acts.className = "actions";
+    const enc = encodeURIComponent(it.file);
+    if (it.preview) {
+      const p = document.createElement("button"); p.className = "small"; p.textContent = "▶ Preview";
+      p.onclick = () => { const a = document.createElement("audio"); a.controls = true; a.src = `/api/library/${enc}/preview`; el.append(a); a.play().catch(() => {}); p.remove(); };
+      acts.append(p);
+    }
+    const send = document.createElement("button"); send.className = "small primary"; send.textContent = "Send to flash drive";
+    send.onclick = () => sendToDrive(it.file, send);
+    const dl = document.createElement("a"); dl.className = "btn small"; dl.textContent = "Download"; dl.href = `/api/library/${enc}/midi`; dl.download = it.file;
+    const rv = document.createElement("button"); rv.className = "small"; rv.textContent = "Show in Finder";
+    rv.onclick = () => api(`/api/library/${enc}/reveal`, { method: "POST" }).catch(e => toast(e.message));
+    const rm = document.createElement("button"); rm.className = "small"; rm.textContent = "Remove";
+    rm.onclick = async () => { if (!confirm(`Move "${it.file}" to the Trash?`)) return;
+      try { await api(`/api/library/${enc}/trash`, { method: "POST" }); toast("Moved to the Trash."); refreshLibrary(); } catch (e) { toast(e.message); } };
+    acts.append(send, dl, rv, rm); el.append(acts); box.append(el);
+  }
+  if (S.highlight) { const n = $(".song.new"); if (n) n.scrollIntoView({ behavior: "smooth", block: "center" }); S.highlight = null; }
+}
+
+/* ---------- flash drives ---------- */
+function currentDrive() { return S.drives.find(d => d.path === S.drive) || null; }
+async function refreshDrives() {
+  try { S.drives = await api("/api/drives"); } catch { S.drives = []; }
+  if (!currentDrive()) { const good = S.drives.find(d => d.status === "good") || S.drives[0]; S.drive = good ? good.path : null; }
+  renderDrives();
+}
+function renderDrives() {
+  const box = $("#drives"); box.innerHTML = "";
+  if (!S.drives.length) { box.innerHTML = `<p class="empty">Plug in your flash drive. It will show up here by itself.</p>`; return; }
+  for (const d of S.drives) {
+    const el = document.createElement("div"); el.className = "drive" + (d.path === S.drive ? " sel" : "");
+    el.setAttribute("role", "button"); el.tabIndex = 0;
+    el.innerHTML = `<span class="dot ${d.status}"></span><div class="grow"><b>${esc(d.name)}</b> <span class="meta">${esc(d.filesystem)} · ${fmtGB(d.free_bytes)} free</span>
+      <div class="meta">${esc(d.note)}${d.writable ? "" : " It is locked (read-only)."}</div></div>`;
+    const acts = document.createElement("div"); acts.className = "actions"; acts.style.marginTop = "0";
+    const tidy = document.createElement("button"); tidy.className = "small"; tidy.textContent = "Tidy";
+    tidy.title = "Remove the hidden files a Mac leaves on drives";
+    tidy.onclick = e => { e.stopPropagation(); tidyDrive(d, tidy); };
+    const ej = document.createElement("button"); ej.className = "small"; ej.textContent = "Eject";
+    ej.onclick = async e => { e.stopPropagation(); ej.disabled = true;
+      try { await api("/api/drives/eject", { method: "POST", json: { drive: d.path } }); toast(`${d.name} is ejected. You can unplug it.`); refreshDrives(); }
+      catch (err) { ej.disabled = false; toast(err.message, 6000); } };
+    acts.append(tidy, ej); el.append(acts);
+    const pick = () => { S.drive = d.path; store.set("drive", S.drive); renderDrives(); };
+    el.addEventListener("click", pick); el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    box.append(el);
+  }
+}
+async function tidyDrive(d, btn) {
+  btn.disabled = true;
+  try {
+    const r = await api("/api/drives/tidy", { method: "POST", json: { drive: d.path, dry_run: true } });
+    if (!r.found) { toast(`${d.name} is already tidy.`); return; }
+    if (!confirm(`${d.name} has ${r.found} hidden Mac file(s), like ${r.examples.slice(0, 3).join(", ")}. They are not songs, and the Clavinova may show them as broken files. Remove them?`)) return;
+    const done = await api("/api/drives/tidy", { method: "POST", json: { drive: d.path, dry_run: false } });
+    toast(`Removed ${done.removed} hidden file(s) from ${d.name}.`);
+  } catch (e) { toast(e.message, 6000); } finally { btn.disabled = false; }
+}
+async function sendToDrive(file, btn) {
+  const d = currentDrive();
+  if (!d) { toast("Plug in your flash drive first. It will show up in the Flash drive box.", 5000); $("#drive-h").scrollIntoView({ behavior: "smooth" }); return; }
+  if (d.status === "bad" && !confirm(`${d.name} is formatted ${d.filesystem}, which the Clavinova cannot read. Copy anyway?`)) return;
+  if (d.status === "warn" && !confirm(`${d.name} is exFAT, which the CVP-503 probably cannot read. Copy anyway?`)) return;
+  btn.disabled = true; const old = btn.textContent; btn.textContent = "Copying...";
+  try {
+    const r = await api("/api/drives/copy", { method: "POST", json: { drive: d.path, name: file } });
+    toast(r.already_there ? `It is already on ${d.name} as "${r.name}".` : `Copied to ${d.name} as "${r.name}". Eject the drive before unplugging it.`, 5000);
+    btn.textContent = "On the drive ✓";
+  } catch (e) { btn.textContent = old; toast(e.message, 6000); } finally { btn.disabled = false; }
+}
+
+/* ---------- status ---------- */
+async function refreshStatus() {
+  try {
+    const s = await api("/api/status"); S.status = s;
+    fillMelody(s.melody_programs);
+    $("#st-models").textContent = s.models_error ? "AI models failed to load" : s.models_ready ? "Ready" : "Loading the AI models (about 20 seconds the first time)...";
+    $("#st-disk").textContent = `${fmtGB(s.disk_free)} free on this Mac`;
+    $("#st-ytdlp").textContent = `Downloader ${s.ytdlp}`;
+    const banner = $("#banner"); banner.innerHTML = "";
+    if (s.models_error) banner.innerHTML = `<div class="msg bad">The AI models could not load: ${esc(s.models_error)}</div>`;
+    else if (s.disk_free < 1.5e9) banner.innerHTML = `<div class="msg warn">Your Mac has only ${fmtGB(s.disk_free)} free. Each song needs some room while it is being made. Free up a few GB if songs fail.</div>`;
+  } catch (e) {
+    $("#st-models").textContent = "Not connected"; $("#banner").innerHTML = `<div class="msg bad">${esc(e.message)}</div>`;
+  }
+}
+$("#update-btn").addEventListener("click", async e => {
+  const b = e.target; b.disabled = true; b.textContent = "Updating...";
+  try { await api("/api/update-downloader", { method: "POST" }); toast("Updated. Restarting the app...", 8000); setTimeout(() => location.reload(), 7000); }
+  catch (err) { toast(err.message, 6000); b.disabled = false; b.textContent = "Update downloader"; }
+});
+$("#lib-btn").addEventListener("click", () => api("/api/open-library", { method: "POST" }).catch(e => toast(e.message)));
+
+initModes();
+refreshStatus(); setInterval(refreshStatus, 5000);
+refreshDrives(); setInterval(refreshDrives, 4000);
+refreshLibrary(); refreshJobs();
+</script>
+</body>
+</html>
