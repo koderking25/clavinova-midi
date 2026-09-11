@@ -95,6 +95,7 @@ class Models:
         self._tk = self._dm = self._bp = None
         self.ready = False
         self.error = None
+        self.state = "loading"           # loading, ready or error
 
     def transkun(self):
         with self.lock:
@@ -128,16 +129,163 @@ class Models:
             return self._bp
 
     def warm_up(self):
+        self.state = "loading"
         try:
             self.transkun()
             self.demucs()
             self.basic_pitch()
-            self.ready = True
+            self.ready, self.error, self.state = True, None, "ready"
         except Exception as e:  # noqa: BLE001
             self.error = f"{type(e).__name__}: {e}"
+            self.state = "error"
 
 
 MODELS = Models()
+MODELS_CHECKED = threading.Event()
+
+
+# ---------- every song is made in its own process ----------
+# When the process ends, macOS gets every byte of its memory back. Freeing the models inside a
+# long-running process returned anywhere from a third to all of it (measured), which on an 8 GB
+# Mac means swap and a shrinking disk. It also means a crash in the AI libraries cannot take the
+# app down, and Cancel can stop a song at once.
+
+JOB_FIELDS = ("id", "title", "mode", "source", "video_id", "upload_path", "duration_hint",
+              "melody_program", "split_hands")
+CANCEL_GRACE_S = 3
+
+
+class ChildFailed(Exception):
+    """The song's process failed. .details holds its traceback for the error log."""
+
+    def __init__(self, message, details=""):
+        super().__init__(message)
+        self.details = details
+
+
+def _child_song(fields, work_root, lib_dir, q, cancel_evt, parent_pid):
+    import warnings
+    warnings.filterwarnings("ignore")
+    job = Job(**fields)
+
+    def watch():
+        while True:
+            if cancel_evt.wait(1.0):
+                job.cancelled = True
+                return
+            if os.getppid() != parent_pid:           # the app was closed: stop quietly
+                os._exit(1)
+
+    threading.Thread(target=watch, daemon=True).start()
+    try:
+        result = process(job, work_root, lib_dir, lambda j: q.put(("progress", j.stage, j.progress, j.eta)))
+        q.put(("done", result))
+    except Cancelled:
+        q.put(("cancelled",))
+    except UserError as e:
+        q.put(("user_error", str(e)))
+    except MemoryError:
+        q.put(("memory",))
+    except BaseException as e:  # noqa: BLE001
+        import traceback
+        q.put(("error", f"{type(e).__name__}: {e}", traceback.format_exc()))
+
+
+def run_in_child(job, work_root, lib_dir):
+    """Make one song in a fresh process, mirroring its progress onto `job`. Same results and
+    errors as process()."""
+    import multiprocessing as mp
+    import queue as queue_mod
+    ctx = mp.get_context("spawn")
+    q = ctx.Queue()
+    cancel_evt = ctx.Event()
+    fields = {k: getattr(job, k) for k in JOB_FIELDS}
+    proc = ctx.Process(target=_child_song, args=(fields, str(work_root), str(lib_dir), q, cancel_evt, os.getpid()),
+                       daemon=True)
+    proc.start()
+    outcome, cancel_at = None, None
+    try:
+        while outcome is None:
+            if job.cancelled and cancel_at is None:
+                cancel_evt.set()
+                cancel_at = time.time()
+            if cancel_at and time.time() - cancel_at > CANCEL_GRACE_S and proc.is_alive():
+                proc.kill()                           # stuck inside a long model call: end it
+                outcome = ("cancelled",)
+                break
+            try:
+                msg = q.get(timeout=0.5)
+            except queue_mod.Empty:
+                if proc.is_alive():
+                    continue
+                try:
+                    msg = q.get(timeout=1.0)
+                except queue_mod.Empty:
+                    outcome = ("cancelled",) if cancel_at else ("crashed", proc.exitcode)
+                    break
+            if msg[0] == "progress":
+                job.stage = msg[1]
+                job.progress = max(job.progress, msg[2])
+                job.eta = msg[3]
+            else:
+                outcome = msg
+    finally:
+        proc.join(timeout=10)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=5)
+        q.close()
+        shutil.rmtree(Path(work_root) / job.id, ignore_errors=True)
+    kind = outcome[0]
+    if kind == "done":
+        return outcome[1]
+    if kind == "cancelled":
+        raise Cancelled()
+    if kind == "user_error":
+        raise UserError(outcome[1])
+    if kind == "memory":
+        raise MemoryError()
+    if kind == "crashed":
+        if outcome[1] == -9:                          # macOS ends processes when memory runs out
+            raise UserError("Your Mac ran out of memory while making this song. Close other apps "
+                            "(browsers with many tabs use a lot) and try again.")
+        raise ChildFailed(f"the song's process stopped unexpectedly (exit code {outcome[1]})")
+    raise ChildFailed(outcome[1], outcome[2])
+
+
+def _child_check(q):
+    import warnings
+    warnings.filterwarnings("ignore")
+    MODELS.warm_up()
+    q.put((MODELS.ready, MODELS.error))
+
+
+def check_models_in_child(timeout=900):
+    """Load every model once in a throwaway process. Proves they are installed (and downloads the
+    separation model the very first time) without the app keeping their memory."""
+    import multiprocessing as mp
+    ctx = mp.get_context("spawn")
+    q = ctx.Queue()
+    proc = ctx.Process(target=_child_check, args=(q,), daemon=True)
+    MODELS.state = "loading"
+    proc.start()
+    result = (False, None)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            result = q.get(timeout=1.0)
+            break
+        except Exception:  # noqa: BLE001
+            if not proc.is_alive():
+                result = (False, f"the model check stopped (exit code {proc.exitcode})")
+                break
+    proc.join(timeout=10)
+    if proc.is_alive():
+        proc.kill()
+    ok, err = result
+    MODELS.ready, MODELS.error = bool(ok), (None if ok else (err or "the model check timed out"))
+    MODELS.state = "ready" if ok else "error"
+    MODELS_CHECKED.set()
 
 
 class Progress:
@@ -492,7 +640,9 @@ def process(job, work_root, lib_dir, on_update):
         problems = mx.verify_smf(tmp, parts, bpm)
         if problems:
             raise RuntimeError("MIDI self-check failed: " + "; ".join(problems))
-        shutil.copyfile(tmp, out)
+        partial = meta_dir / (out.name + ".partial")
+        shutil.copyfile(tmp, partial)
+        os.replace(partial, out)                        # a stopped song never leaves a half-written file
         preview = meta_dir / (out.stem + ".mp3")
         has_preview = render_preview(out, preview, work)
         result = {

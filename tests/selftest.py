@@ -147,15 +147,16 @@ def main():
         lib = tmp / "lib"
         work = tmp / "work"
 
-        def run(song, mode):
+        def run(song, mode, in_child=False):
             up = tmp / f"upload-{song}-{mode}.wav"
             shutil.copy(tmp / f"{song}.wav", up)
             job = pipeline.Job(title=f"{song} {mode}", mode=mode, source="upload", upload_path=str(up), duration_hint=27)
-            res = pipeline.process(job, work, lib, lambda j: None)
+            res = (pipeline.run_in_child(job, work, lib) if in_child
+                   else pipeline.process(job, work, lib, lambda j: None))
             return res, without_lead_in(lib / res["file"], res["bpm"])
 
-        print("2. Solo piano recording mode")
-        res, out = run("piano", "piano")
+        print("2. Solo piano recording mode (made in its own process, as the app does)")
+        res, out = run("piano", "piano", in_child=True)
         check("piano notes", note_f1(pitched(songs["piano"]), pitched(out)), 0.95)
         check("tempo within 3 BPM of 100", 1.0 if abs(res["bpm"] - 100) <= 3 else 0.0, 1.0)
 

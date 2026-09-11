@@ -168,14 +168,17 @@ const MODE_NAMES = { arrange: "Piano version", piano: "Solo piano", band: "Full 
 const S = { mode: store.get("mode", "arrange"), split: store.get("split", true), melody: store.get("melody", 73),
             drives: [], drive: store.get("drive", null), jobs: [], seenDone: new Set(), highlight: null, status: {} };
 
+const LOST = "Lost connection to the app. This page reconnects by itself as soon as the app is running. If you closed its Terminal window, double-click Clavinova MIDI Maker to start it again.";
 async function api(path, opts = {}) {
   const o = { ...opts, headers: { ...(opts.headers || {}) } };
   if (o.method && o.method !== "GET") o.headers["x-clavinova"] = "1";
   if (o.json !== undefined) { o.body = JSON.stringify(o.json); o.headers["content-type"] = "application/json"; delete o.json; }
   let r;
-  try { r = await fetch(path, o); } catch { throw new Error("The app is not running. Double-click Clavinova MIDI Maker to start it again."); }
+  try { r = await fetch(path, o); } catch { throw new Error(LOST); }
   let data = null; try { data = await r.json(); } catch {}
-  if (!r.ok) throw new Error((data && (data.detail || data.error)) || `Something went wrong (${r.status}).`);
+  // The app always explains its errors in words. A bare error code means something else answered,
+  // usually because the app stopped or is restarting.
+  if (!r.ok) throw new Error((data && (data.detail || data.error)) || LOST);
   return data;
 }
 let toastT;
@@ -412,7 +415,9 @@ async function refreshStatus() {
   try {
     const s = await api("/api/status"); S.status = s;
     fillMelody(s.melody_programs);
-    $("#st-models").textContent = s.models_error ? "AI models failed to load" : s.models_ready ? "Ready" : "Loading the AI models (about 20 seconds the first time)...";
+    const MODEL_TEXT = { ready: "Ready", loading: "Checking the AI models (about 20 seconds)..." };
+    $("#st-models").textContent = s.models_error ? "AI models failed to load"
+      : (MODEL_TEXT[s.models_state] || (s.models_ready ? "Ready" : MODEL_TEXT.loading));
     $("#st-disk").textContent = `${fmtGB(s.disk_free)} free on this Mac`;
     $("#st-ytdlp").textContent = `Downloader ${s.ytdlp}`;
     const banner = $("#banner"); banner.innerHTML = "";

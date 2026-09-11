@@ -50,11 +50,18 @@ ERROR_LOG = STATE / "errors.log"
 
 for _d in (WORK, UPLOADS, STATE, LIB, META):
     _d.mkdir(parents=True, exist_ok=True)
-for _d in WORK.iterdir():                       # leftovers from a crash or a force-quit
-    if _d.is_dir() and _d.name != "uploads":
-        shutil.rmtree(_d, ignore_errors=True)
-for _f in UPLOADS.iterdir():
-    _f.unlink(missing_ok=True)
+
+
+def clean_leftovers():
+    """Remove what a crash or force-quit left behind. Called only at start-up, never on import:
+    each song's process imports this file too, and must not delete the upload it is about to read."""
+    for d in WORK.iterdir():
+        if d.is_dir() and d.name != "uploads":
+            shutil.rmtree(d, ignore_errors=True)
+    for f in UPLOADS.iterdir():
+        f.unlink(missing_ok=True)
+    for f in META.glob("*.partial"):
+        f.unlink(missing_ok=True)
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 JOBS = {}
@@ -79,6 +86,7 @@ def log_error(job, exc):
         with open(ERROR_LOG, "a") as f:
             f.write(f"\n=== {time.ctime()} job {job.id} '{job.title}' mode {job.mode}\n")
             f.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+            f.write(getattr(exc, "details", "") or "")      # the song process's own traceback
     except OSError:
         pass
 
@@ -91,7 +99,9 @@ def worker():
             continue
         job.status = "running"
         try:
-            job.result = pipeline.process(job, WORK, LIB, lambda j: None)
+            job.stage = "Getting ready"
+            pipeline.MODELS_CHECKED.wait(timeout=900)     # never run alongside the start-up model check
+            job.result = pipeline.run_in_child(job, WORK, LIB)
             job.status, job.stage, job.progress, job.eta = "done", "Done", 1.0, 0
         except pipeline.Cancelled:
             job.status, job.stage = "cancelled", "Cancelled"
@@ -140,6 +150,7 @@ def status():
     busy = any(j.status == "running" for j in JOBS.values())
     return {
         "models_ready": pipeline.MODELS.ready,
+        "models_state": pipeline.MODELS.state,
         "models_error": pipeline.MODELS.error,
         "busy": busy,
         "queued": sum(1 for j in JOBS.values() if j.status == "queued"),
@@ -322,6 +333,8 @@ def _lib_file(name):
 def library():
     items = []
     for p in sorted(LIB.glob("*.mid"), key=lambda p: p.stat().st_mtime, reverse=True):
+        if p.name.startswith("."):
+            continue
         meta = {}
         mf = META / (p.stem + ".json")
         if mf.exists():
@@ -430,7 +443,8 @@ def update_downloader():
 
 
 def main():
-    threading.Thread(target=pipeline.MODELS.warm_up, daemon=True).start()
+    clean_leftovers()
+    threading.Thread(target=pipeline.check_models_in_child, daemon=True).start()
     threading.Thread(target=worker, daemon=True).start()
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
 

@@ -91,7 +91,9 @@ Songs can be up to 15 minutes long. Measured on this Mac (M1, 8 GB):
 | Full band | about 5 minutes |
 
 A song uses at most about 3.7 GB of memory while it is being made, so close
-other big apps if your Mac feels slow.
+other big apps if your Mac feels slow. Each song is made in its own process, so
+the moment it finishes, all of that memory goes back to your Mac; between songs
+the app itself uses about 0.3 GB.
 
 ## If something goes wrong
 
