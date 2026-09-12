@@ -27,6 +27,10 @@
   button { font: 500 14px inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
            border-radius: 9px; padding: 8px 14px; cursor: pointer; }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn { display: inline-block; font: 500 14px inherit; background: var(--accent); color: var(--accent-ink);
+         border-radius: 9px; padding: 9px 15px; text-decoration: none; }
+  .btn:hover { filter: brightness(1.06); }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
   button:disabled { opacity: .5; cursor: default; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .choice { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -83,6 +87,30 @@
       <button id="tidy" class="hidden">Tidy hidden Mac files</button>
     </div>
     <p class="muted" id="driveInfo"></p>
+  </section>
+
+  <section id="getApp">
+    <h2>Want the whole piano, not just the white keys?</h2>
+    <p style="margin:0 0 10px">This page is the demo. It does <b>solo piano</b>, because it is asking your
+      browser to do something browsers were never built for. The Mac app is the real thing:</p>
+    <ul style="margin:0 0 14px">
+      <li><b>Any song, not just piano.</b> It pulls the drums, bass, chords and singing apart first, so a
+        full band becomes a piano version with the tune in your right hand, or four separate Clavinova parts.</li>
+      <li><b>About five times faster</b>, because it runs the models properly instead of inside a tab.</li>
+      <li><b>Type a song name</b> and pick a recording, instead of hunting for a file first.</li>
+      <li><b>The full flash drive treatment</b>: it checks the format, copies without leaving hidden Mac
+        files behind, tidies up old ones, and ejects the drive.</li>
+      <li><b>Keeps your songs</b> in one place with a preview of each.</li>
+    </ul>
+    <div class="row">
+      <a class="btn" id="appLink"
+         href="https://github.com/koderking25/clavinova-midi/releases/latest/download/Clavinova-MIDI-Maker.zip">Download the Mac app</a>
+      <a class="btn ghost" href="https://github.com/koderking25/clavinova-midi#the-mac-app">How to install it</a>
+    </div>
+    <p class="muted" style="margin-top:10px">Apple Silicon Mac. Still nothing uploaded, still nobody's server.
+      macOS will not open an app from the web on a plain double click unless it is signed by a paid Apple
+      account, so right click it and choose <b>Open</b> the first time. The one line install on the
+      instructions page skips that dance.</p>
   </section>
 
   <footer>

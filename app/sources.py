@@ -15,8 +15,10 @@ from pathlib import Path
 
 import yt_dlp
 
-STATE = Path(__file__).resolve().parent.parent / "state"
-STATE.mkdir(exist_ok=True)
+import os
+
+STATE = Path(os.environ.get("CLAVINOVA_STATE", Path(__file__).resolve().parent.parent / "state"))
+STATE.mkdir(parents=True, exist_ok=True)
 COOLDOWN_FILE = STATE / "cooldowns.json"
 UA = "ClavinovaMIDIMaker/1.0 (personal, one request per search)"
 

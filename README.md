@@ -122,6 +122,35 @@ the app itself uses about 0.3 GB.
   which every Clavinova that reads MIDI files can play. Every file is read back
   and checked before it is saved.
 
+## The Mac app
+
+The website is the demo and does solo piano only. The Mac app is the full thing:
+every mode, about five times faster, song search, and the complete flash drive
+handling.
+
+Install it with one line in Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/koderking25/clavinova-midi/main/mac/install.sh | bash
+```
+
+That downloads the code, sets up its private Python environment, builds the app
+and puts **Clavinova MIDI Maker** in your Applications folder. Opening it the
+first time downloads the AI models, which takes about ten minutes and needs
+[Homebrew](https://brew.sh) for the audio tools.
+
+There is also a zip of the app on the
+[releases page](https://github.com/koderking25/clavinova-midi/releases/latest).
+It is not signed with an Apple developer account, so macOS will not open it on a
+double click: right click the app and choose **Open** the first time, then
+**Open** again in the warning. The one line install above avoids that.
+
+To rebuild the app after changing the code:
+
+```bash
+.venv/bin/python mac/build_app.py
+```
+
 ## The browser version (no install, nothing uploaded)
 
 `web/` holds a version that runs entirely in a browser tab. It produces the same

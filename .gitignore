@@ -12,4 +12,7 @@ state/
 web/models/
 web/test/
 
+# The built Mac app and its zip, made by mac/build_app.py
+mac/build/
+
 .DS_Store

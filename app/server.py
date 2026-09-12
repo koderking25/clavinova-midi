@@ -39,9 +39,11 @@ import sources  # noqa: E402
 import usb  # noqa: E402
 
 ROOT = APP.parent
-WORK = ROOT / "work"
+# Inside a Mac .app the code folder is read only, so the launcher points these somewhere
+# writable. Left alone they behave exactly as before.
+WORK = Path(os.environ.get("CLAVINOVA_WORK", ROOT / "work"))
 UPLOADS = WORK / "uploads"
-STATE = ROOT / "state"
+STATE = Path(os.environ.get("CLAVINOVA_STATE", ROOT / "state"))
 LIB = Path(os.environ.get("CLAVINOVA_LIBRARY", Path.home() / "Music" / "Clavinova MIDI"))
 META = LIB / ".clavinova"
 PORT = int(os.environ.get("CLAVINOVA_PORT", "8765"))
