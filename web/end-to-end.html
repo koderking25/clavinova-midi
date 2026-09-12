@@ -1,0 +1,136 @@
+<!-- The whole browser pipeline on the piano test song, checked against the notes the
+     Mac version produces (which match PyTorch note for note). Also times each stage. -->
+<title>End to end check</title>
+<style>
+  body { font: 13px ui-monospace, Menlo, monospace; background: #14110f; color: #eee7db; margin: 0; padding: 24px; }
+  h1 { font: 600 18px system-ui, sans-serif; margin: 0 0 16px; }
+  button { font: 500 14px system-ui, sans-serif; background: #d2624a; color: #fff; border: 0; border-radius: 8px; padding: 9px 16px; cursor: pointer; }
+  #log { white-space: pre-wrap; line-height: 1.6; margin-top: 16px; }
+  .ok { color: #8fd18f; } .bad { color: #ef8d7a; } .dim { color: #9b9289; }
+</style>
+<h1>End to end check</h1>
+<button id="run">Run the check</button>
+<div id="log"></div>
+<script type="module">
+  import { Features } from "./js/features.js";
+  import { Decoder } from "./js/decode.js";
+  import { writeMidi, pianoParts, pedalEvents } from "./js/midi.js";
+
+  const VER = "1.29.0";
+  // ?backend=wasm runs the models on the processor instead of the graphics chip, which is
+  // the way to tell whether the graphics chip's numerical shortcuts are shifting notes.
+  const BACKEND = new URLSearchParams(location.search).get("backend") || "webgpu";
+  const log = (m, c = "") => document.querySelector("#log").insertAdjacentHTML("beforeend", `<div class="${c}">${m}</div>`);
+  const ms = (t) => Math.round(t) + " ms";
+
+  document.querySelector("#run").onclick = async () => {
+    document.querySelector("#log").innerHTML = "";
+    try {
+      const base = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${VER}/dist/`;
+      const ort = await import(base + "ort.webgpu.min.mjs");
+      ort.env.wasm.wasmPaths = base;
+      ort.env.logLevel = "error";
+      // Multiple cores need shared memory, which browsers only allow on a page served
+      // with the two cross origin headers. Without them this quietly runs on one core.
+      ort.env.wasm.numThreads = crossOriginIsolated ? (navigator.hardwareConcurrency || 4) : 1;
+      log(`cross origin isolated: ${crossOriginIsolated ? "yes" : "no"}, ` +
+          `cores this page may use: ${ort.env.wasm.numThreads} of ${navigator.hardwareConcurrency}`,
+          crossOriginIsolated ? "ok" : "bad");
+
+      const t0 = performance.now();
+      const [features, decoder] = await Promise.all([Features.load("models/"), Decoder.load("models/")]);
+      const cfg = features.cfg;
+      const bytes = new Uint8Array(await (await fetch("models/backbone.web.onnx")).arrayBuffer());
+      const scorerBytes = new Uint8Array(await (await fetch("models/scorer.web.onnx")).arrayBuffer());
+      const backbone = await ort.InferenceSession.create(bytes, { executionProviders: [BACKEND] });
+      const scorer = await ort.InferenceSession.create(scorerBytes, { executionProviders: [BACKEND] });
+      log(`models ready in ${ms(performance.now() - t0)} (${((bytes.length + scorerBytes.length) / 1e6).toFixed(1)} MB)`, "dim");
+
+      const expected = await (await fetch("test/piano_notes.json")).json();
+      const inter = new Float32Array(await (await fetch("test/piano_audio.bin")).arrayBuffer());
+      const n = inter.length / 2;
+      const fs = cfg.fs, hop = cfg.hopSize;
+      const padSeconds = cfg.chunkSeconds - cfg.hopSeconds;
+      const pad = Math.ceil(padSeconds * fs);
+      const total = n + 2 * pad;
+      const left = new Float32Array(total), right = new Float32Array(total);
+      for (let i = 0; i < n; i++) { left[pad + i] = inter[2 * i]; right[pad + i] = inter[2 * i + 1]; }
+      const segSize = Math.ceil(cfg.chunkSeconds * fs);
+      const stepSize = Math.ceil((cfg.hopSeconds * fs) / hop) * hop;
+      const lastFrameIdx = Math.round(segSize / hop);
+      const nP = cfg.pitches.length;
+      let forced = new Array(nP).fill(Math.floor((padSeconds * fs) / hop));
+      const byPitch = new Map();
+      log(`${(n / fs).toFixed(1)} s of audio, chunks of ${cfg.chunkSeconds} s every ${cfg.hopSeconds} s`);
+
+      const times = { features: 0, backbone: 0, scorerAndNotes: 0 };
+      const runScorer = async (slice, count) => {
+        const out = await scorer.run({ ctx: new ort.Tensor("float32", slice, [count, cfg.framesPerChunk, cfg.ctxSize]) });
+        return out[Object.keys(out)[0]].data;
+      };
+
+      const started = performance.now();
+      let chunks = 0;
+      for (let i = 0; i < total; i += stepSize) {
+        const end = Math.min(i + segSize, total);
+        const featuresBefore = times.features, backboneBefore = times.backbone, notesBefore = times.scorerAndNotes;
+        const l = new Float32Array(segSize), r = new Float32Array(segSize);
+        l.set(left.subarray(i, end)); r.set(right.subarray(i, end));
+        let t = performance.now();
+        const { mel, nFrames } = features.compute(l, r, segSize);
+        times.features += performance.now() - t;
+        t = performance.now();
+        const ctxOut = await backbone.run({ mel: new ort.Tensor("float32", mel, [1, nFrames, cfg.nMels, cfg.nWindows]) });
+        const ctx = ctxOut[Object.keys(ctxOut)[0]].data;
+        times.backbone += performance.now() - t;
+        t = performance.now();
+        const { notes, lastP } = await decoder.chunk(ctx, nFrames, runScorer, forced, lastFrameIdx);
+        times.scorerAndNotes += performance.now() - t;
+        Decoder.merge(byPitch, notes, i / fs - padSeconds);
+        forced = lastP.map((k) => Math.max(k - Math.floor(stepSize / hop), 0));
+        chunks++;
+        log(`  chunk ${chunks}: ${notes.length} events (features ${ms(times.features - featuresBefore)}, ` +
+            `backbone ${ms(times.backbone - backboneBefore)}, notes ${ms(times.scorerAndNotes - notesBefore)})`, "dim");
+      }
+      const { notes, pedals } = Decoder.finish(byPitch);
+      const elapsed = performance.now() - started;
+
+      log(`\n${chunks} chunks in ${(elapsed / 1000).toFixed(1)} s ` +
+          `(features ${ms(times.features)}, backbone ${ms(times.backbone)}, scorer and notes ${ms(times.scorerAndNotes)})`);
+      log(`that is ${(elapsed / 1000 / (n / fs)).toFixed(2)} times the length of the song`);
+      log(`found ${notes.length} notes and ${pedals.length} pedal events; the Mac version found ` +
+          `${expected.notes.filter((x) => x.pitch > 0).length} notes`);
+
+      // Compare: same pitch within 50 ms, the same rule the Mac tests use.
+      const want = expected.notes.filter((x) => x.pitch > 0);
+      const used = new Array(want.length).fill(false);
+      let matched = 0, sameVelocity = 0, biggestShift = 0;
+      for (const got of notes) {
+        let best = -1, bestGap = 0.05;
+        for (let i = 0; i < want.length; i++) {
+          if (used[i] || want[i].pitch !== got.pitch) continue;
+          const gap = Math.abs(want[i].start - got.start);
+          if (gap < bestGap) { bestGap = gap; best = i; }
+        }
+        if (best >= 0) {
+          used[best] = true;
+          matched++;
+          if (want[best].velocity === got.velocity) sameVelocity++;
+          biggestShift = Math.max(biggestShift, bestGap);
+        }
+      }
+      const p = matched / Math.max(notes.length, 1), r = matched / Math.max(want.length, 1);
+      const f1 = (2 * p * r) / Math.max(p + r, 1e-9);
+      log(`matching notes ${matched}; F1 ${f1.toFixed(4)} (1.0000 means the same notes)`,
+          f1 > 0.999 ? "ok" : "bad");
+      log(`loudness identical on ${sameVelocity} of ${matched}; biggest timing shift ` +
+          `${(biggestShift * 1000).toFixed(1)} ms`, sameVelocity === matched ? "ok" : "bad");
+
+      const mid = writeMidi(pianoParts(notes, pedalEvents(pedals), true), { bpm: 100, title: "Browser test" });
+      log(`wrote a MIDI file of ${mid.length} bytes, starting with ${String.fromCharCode(...mid.slice(0, 4))}`,
+          String.fromCharCode(...mid.slice(0, 4)) === "MThd" ? "ok" : "bad");
+    } catch (e) {
+      log(String((e && e.stack) || e).slice(0, 600), "bad");
+    }
+  };
+</script>

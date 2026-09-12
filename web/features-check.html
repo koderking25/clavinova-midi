@@ -1,0 +1,65 @@
+<!-- Does the JavaScript audio-features code match PyTorch, and how fast is it? -->
+<title>Audio features check</title>
+<style>
+  body { font: 13px ui-monospace, Menlo, monospace; background: #14110f; color: #eee7db; margin: 0; padding: 24px; }
+  h1 { font: 600 18px system-ui, sans-serif; margin: 0 0 16px; }
+  button { font: 500 14px system-ui, sans-serif; background: #d2624a; color: #fff; border: 0; border-radius: 8px; padding: 9px 16px; cursor: pointer; }
+  #log { white-space: pre-wrap; line-height: 1.6; margin-top: 16px; }
+  .ok { color: #8fd18f; } .bad { color: #ef8d7a; } .dim { color: #9b9289; }
+</style>
+<h1>Audio features check</h1>
+<button id="run">Run the check</button>
+<div id="log"></div>
+<script type="module">
+  import { Features } from "./js/features.js";
+  const log = (m, c = "") => document.querySelector("#log").insertAdjacentHTML("beforeend", `<div class="${c}">${m}</div>`);
+
+  document.querySelector("#run").onclick = async () => {
+    document.querySelector("#log").innerHTML = "";
+    try {
+      const t0 = performance.now();
+      const f = await Features.load("models/");
+      log(`loaded the window shapes and mel filters in ${Math.round(performance.now() - t0)} ms`, "dim");
+      log(`mel filters stored as ${f.melWeights.length} weights instead of ${f.cfg.nFreq * f.cfg.nMels} ` +
+          `(${(100 * f.melWeights.length / (f.cfg.nFreq * f.cfg.nMels)).toFixed(1)}% of the full table)`, "dim");
+
+      const inter = new Float32Array(await (await fetch("test/audio.bin")).arrayBuffer());
+      const want = new Float32Array(await (await fetch("test/mel_expected.bin")).arrayBuffer());
+      const n = inter.length / 2;
+      const left = new Float32Array(n), right = new Float32Array(n);
+      for (let i = 0; i < n; i++) { left[i] = inter[2 * i]; right[i] = inter[2 * i + 1]; }
+      log(`test audio: ${n} samples (${(n / f.cfg.fs).toFixed(1)} s), expecting ${want.length} numbers`);
+
+      const t1 = performance.now();
+      const { mel, nFrames } = f.compute(left, right, n);
+      const ms = performance.now() - t1;
+      log(`computed ${nFrames} frames in ${Math.round(ms)} ms`);
+      if (mel.length !== want.length) {
+        log(`SIZE MISMATCH: got ${mel.length}, expected ${want.length}`, "bad");
+      } else {
+        let biggest = 0, sum = 0;
+        for (let i = 0; i < mel.length; i++) {
+          const d = Math.abs(mel[i] - want[i]);
+          if (d > biggest) biggest = d;
+          sum += d;
+        }
+        const cls = biggest < 1e-4 ? "ok" : "bad";
+        log(`biggest difference from PyTorch ${biggest.toExponential(2)}, average ${(sum / mel.length).toExponential(2)}`, cls);
+      }
+      // A full 16 second chunk is what really matters for speed.
+      const big = Math.ceil(16 * f.cfg.fs);
+      const bl = new Float32Array(big), br = new Float32Array(big);
+      for (let i = 0; i < big; i++) { bl[i] = Math.sin(i / 40) * 0.3; br[i] = Math.sin(i / 55) * 0.2; }
+      const runs = [];
+      for (let i = 0; i < 3; i++) {
+        const t = performance.now();
+        f.compute(bl, br, big);
+        runs.push(performance.now() - t);
+      }
+      log(`full 16 s chunk: ${runs.map((r) => Math.round(r) + " ms").join(", ")} ` +
+          `(the converted model took about 3233 ms for this step)`, "ok");
+    } catch (e) {
+      log(String(e && e.stack || e).slice(0, 500), "bad");
+    }
+  };
+</script>
