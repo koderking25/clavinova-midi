@@ -7,4 +7,9 @@ __pycache__/
 work/
 state/
 
+# Browser model files: generated from the Python model by web/export_models.py.
+# Too big for a git repo (the backbone alone is 63 MB) and exactly reproducible.
+web/models/
+web/test/
+
 .DS_Store
