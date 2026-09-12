@@ -121,3 +121,67 @@ the app itself uses about 0.3 GB.
 - Output: Standard MIDI File format 0 with a General MIDI reset at the start,
   which every Clavinova that reads MIDI files can play. Every file is read back
   and checked before it is saved.
+
+## The browser version (no install, nothing uploaded)
+
+`web/` holds a version that runs entirely in a browser tab. It produces the same
+notes as the Mac app: on the test song, 180 notes, the same notes, loudness
+identical on all 180, largest timing difference 0.0 ms.
+
+Visitors download about 73 MB of model files once, then it is cached. Nothing is
+uploaded: the song never leaves the computer it is played on.
+
+### Build the model files
+
+```bash
+.venv/bin/python web/export_models.py
+```
+
+This converts the same model the Mac app uses and checks every piece against
+PyTorch before keeping it. The files land in `web/models/` and stay out of the
+repo.
+
+### Run it locally
+
+```bash
+.venv/bin/python web/serve.py
+```
+
+Then open http://127.0.0.1:8792. That small server exists for one reason: it
+sends the two headers (`Cross-Origin-Opener-Policy` and
+`Cross-Origin-Embedder-Policy`) that let the page use every processor core.
+Without them the browser allows one core and the work takes twice as long.
+Cloudflare Pages and Workers can send the same two headers.
+
+### Speed, measured on this Mac (M1, 8 GB, 8 cores)
+
+| | 27 seconds of audio |
+| --- | --- |
+| Exact (processor, 8 cores) | 52 s, about 1.9 times the song |
+| Exact (processor, 1 core) | 95 s |
+| Faster (graphics chip) | 49 s |
+
+Chunks are 16 seconds long and start every 12 seconds. The chunk length is the
+model's own and shortening it ruins accuracy (1.000 at 16 s, 0.599 at 8 s). The
+gap between chunks is ours, chosen by measurement: 12 s matches the 8 s default
+on the piano test and is slightly better on the band test, with half the work.
+
+### Exact or Faster
+
+The graphics chip takes numerical shortcuts. Same pipeline, same song: 181 notes
+instead of 180, and loudness matching on 82 of 180. It is offered as "Faster"
+with that written on it, and "Exact" is the default.
+
+### Flash drive in a browser
+
+Chrome and Edge on a computer can write straight to a drive the visitor picks,
+and can clear the hidden files macOS leaves behind. Safari and Firefox get a
+Download button instead. A browser cannot ask how a drive is formatted, so the
+page guesses from how precisely the drive stores file times (FAT32 rounds to two
+seconds) and says so cautiously. **This has not been tried on a real flash drive
+yet.**
+
+### Not in the browser yet
+
+Piano version and Full band need the instrument separation model, which is a
+further 166 MB download. The browser version does the solo piano path only.

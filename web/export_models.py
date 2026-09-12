@@ -41,6 +41,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MODELS = os.path.join(HERE, "models")
 TESTS = os.path.join(HERE, "test")
 CHUNK_SECONDS = 16                 # the model's native chunk; shorter chunks ruin accuracy
+# How far apart the chunks start. Measured against the known answers: 8 s (the model's own
+# default) and 12 s both score 1.000 on the piano test, and 12 s is slightly better on the
+# band test (0.813 against 0.798), with half as many chunks. At 14 s the piano test slips.
+HOP_SECONDS = 12
 SCORER_GROUP = 9                   # pitches per scorer run: 10 runs per chunk
 TOLERANCE_PERCENT = 0.05           # largest difference from PyTorch, as a share of the value range
 
@@ -187,7 +191,7 @@ def main():
     cfg = dict(windowSize=int(win), hopSize=int(hop), fs=int(fs), nWindows=int(wins.shape[0]),
                nMels=int(fx.freq2mels.shape[1]), nFreq=int(fx.freq2mels.shape[0]),
                log=bool(fx.log), eps=float(fx.eps), toMono=bool(fx.toMono),
-               chunkSeconds=CHUNK_SECONDS, hopSeconds=CHUNK_SECONDS // 2,
+               chunkSeconds=CHUNK_SECONDS, hopSeconds=HOP_SECONDS,
                framesPerChunk=int(n_frames), scorerGroup=SCORER_GROUP,
                pitches=[int(p) for p in model.targetMIDIPitch], ctxSize=int(model.scorer.size))
     json.dump(cfg, open(os.path.join(MODELS, "config.json"), "w"), indent=1)

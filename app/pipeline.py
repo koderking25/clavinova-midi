@@ -440,7 +440,12 @@ def run_transkun(x):
     from transkun.Data import writeMidi
     model = MODELS.transkun()
     with torch.inference_mode():
-        notes = model.transcribe(torch.from_numpy(np.ascontiguousarray(x)), discardSecondHalf=False)
+        # 16 second chunks starting every 12 seconds. The chunk length is the model's own and
+        # shortening it ruins accuracy (1.000 at 16 s, 0.599 at 8 s on the piano test). The gap
+        # between chunks is ours: 12 s scores the same 1.000 on piano and slightly better on the
+        # band test than the 8 s default (0.813 against 0.798), with half as many chunks to run.
+        notes = model.transcribe(torch.from_numpy(np.ascontiguousarray(x)),
+                                 stepInSecond=12, segmentSizeInSecond=16, discardSecondHalf=False)
     pm = writeMidi(notes)
     ins = pm.instruments[0] if pm.instruments else None
     if ins is None:
