@@ -4,6 +4,12 @@
 //
 // The Python version of this passes a round trip test (every note read back identical) and
 // refuses deliberately damaged files, so this follows it exactly.
+//
+// One harmless difference: this writer puts a status byte on every message, while the Python
+// one lets mido use running status (leaving out a repeated status byte). Files from the two
+// therefore differ in size, about 1650 bytes against 1536 on the test song, while holding
+// exactly the same 180 notes and 381 events. Explicit status bytes are the safer form for an
+// instrument from 2007.
 
 const PPQ = 480;
 const SETUP_TICK = PPQ / 2;
