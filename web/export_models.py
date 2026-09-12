@@ -47,6 +47,20 @@ CHUNK_SECONDS = 16                 # the model's native chunk; shorter chunks ru
 HOP_SECONDS = 12
 SCORER_GROUP = 9                   # pitches per scorer run: 10 runs per chunk
 TOLERANCE_PERCENT = 0.05           # largest difference from PyTorch, as a share of the value range
+# Cloudflare will not serve a single static file larger than 25 MiB, and the backbone is
+# about 63 MB, so it ships in pieces and the browser joins them back together.
+CHUNK_BYTES = 20_000_000
+
+
+def split_file(path, chunk=CHUNK_BYTES):
+    """Split a file into path.part0, path.part1, ... and remove the original."""
+    data = open(path, "rb").read()
+    pieces = [data[i:i + chunk] for i in range(0, len(data), chunk)]
+    for i, piece in enumerate(pieces):
+        with open(f"{path}.part{i}", "wb") as f:
+            f.write(piece)
+    os.remove(path)
+    return len(pieces)
 
 
 def load_model():
@@ -155,6 +169,9 @@ def main():
           f"({share:.4f}% of its range)")
     if share > TOLERANCE_PERCENT:
         problems.append(f"backbone differs by {share:.4f}% of its range")
+    backbone_parts = split_file(path)
+    print(f"                              shipped as {backbone_parts} pieces of at most "
+          f"{CHUNK_BYTES / 1e6:.0f} MB, joined again in the browser")
 
     # ---- scorer ---------------------------------------------------------------
     sc = Scorer(model.scorer, n_frames).eval()
@@ -192,7 +209,7 @@ def main():
                nMels=int(fx.freq2mels.shape[1]), nFreq=int(fx.freq2mels.shape[0]),
                log=bool(fx.log), eps=float(fx.eps), toMono=bool(fx.toMono),
                chunkSeconds=CHUNK_SECONDS, hopSeconds=HOP_SECONDS,
-               framesPerChunk=int(n_frames), scorerGroup=SCORER_GROUP,
+               framesPerChunk=int(n_frames), scorerGroup=SCORER_GROUP, backboneParts=backbone_parts,
                pitches=[int(p) for p in model.targetMIDIPitch], ctxSize=int(model.scorer.size))
     json.dump(cfg, open(os.path.join(MODELS, "config.json"), "w"), indent=1)
     print(f"windows.bin         {wins.numel()*4/1e6:6.2f} MB   {tuple(wins.shape)}")

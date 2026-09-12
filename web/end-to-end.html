@@ -40,7 +40,17 @@
       const t0 = performance.now();
       const [features, decoder] = await Promise.all([Features.load("models/"), Decoder.load("models/")]);
       const cfg = features.cfg;
-      const bytes = new Uint8Array(await (await fetch("models/backbone.web.onnx")).arrayBuffer());
+      const grab = async (f) => new Uint8Array(await (await fetch("models/" + f)).arrayBuffer());
+      let bytes;
+      if (cfg.backboneParts) {                       // shipped in pieces, joined here
+        const pieces = await Promise.all(
+          Array.from({ length: cfg.backboneParts }, (_, i) => grab(`backbone.web.onnx.part${i}`)));
+        bytes = new Uint8Array(pieces.reduce((n, p) => n + p.length, 0));
+        let at = 0;
+        for (const p of pieces) { bytes.set(p, at); at += p.length; }
+      } else {
+        bytes = await grab("backbone.web.onnx");
+      }
       const scorerBytes = new Uint8Array(await (await fetch("models/scorer.web.onnx")).arrayBuffer());
       const backbone = await ort.InferenceSession.create(bytes, { executionProviders: [BACKEND] });
       const scorer = await ort.InferenceSession.create(scorerBytes, { executionProviders: [BACKEND] });

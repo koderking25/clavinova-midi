@@ -7,9 +7,11 @@ __pycache__/
 work/
 state/
 
-# Browser model files: generated from the Python model by web/export_models.py.
-# Too big for a git repo (the backbone alone is 63 MB) and exactly reproducible.
-web/models/
+# The browser model files DO ship: the website serves them, so they have to be in the
+# repo. Rebuild them with web/export_models.py. The backbone is split into pieces
+# because no static host serves a 63 MB file as one lump.
+
+# Test fixtures for the workbench pages: generated, and not needed by the website.
 web/test/
 
 # The built Mac app and its zip, made by mac/build_app.py

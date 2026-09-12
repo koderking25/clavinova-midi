@@ -70,7 +70,20 @@ export class Engine {
     onStatus("Loading the listening model");
     const [features, decoder] = await Promise.all([Features.load(base), Decoder.load(base)]);
     const grab = async (file) => new Uint8Array(await (await fetch(base + file)).arrayBuffer());
-    const backbone = await ort.InferenceSession.create(await grab("backbone.web.onnx"), { executionProviders: [provider] });
+    // The backbone arrives in pieces, because no host will serve a 63 MB file as one lump.
+    const joinParts = async (file, count) => {
+      const pieces = await Promise.all(
+        Array.from({ length: count }, (_, i) => grab(`${file}.part${i}`)));
+      const total = pieces.reduce((n, p) => n + p.length, 0);
+      const all = new Uint8Array(total);
+      let at = 0;
+      for (const p of pieces) { all.set(p, at); at += p.length; }
+      return all;
+    };
+    const backboneBytes = features.cfg.backboneParts
+      ? await joinParts("backbone.web.onnx", features.cfg.backboneParts)
+      : await grab("backbone.web.onnx");
+    const backbone = await ort.InferenceSession.create(backboneBytes, { executionProviders: [provider] });
     const scorer = await ort.InferenceSession.create(await grab("scorer.web.onnx"), { executionProviders: [provider] });
     return new Engine(ort, features, decoder, backbone, scorer, provider);
   }

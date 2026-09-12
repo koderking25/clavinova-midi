@@ -1,0 +1,16 @@
+# Headers for the deployed site.
+#
+# The first two are the reason the page can use every processor core. Browsers only hand
+# out shared memory, and therefore multi threaded work, to a page that sends both. Without
+# them the site still works but runs on one core and takes about twice as long.
+#
+# "credentialless" rather than "require-corp" so the page can still load the runtime from
+# a public CDN, which would otherwise be blocked.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+
+# The model files never change without changing their name, so let browsers keep them.
+# A visitor downloads them once, not once per visit.
+/models/*
+  Cache-Control: public, max-age=31536000, immutable
