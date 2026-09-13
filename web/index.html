@@ -104,15 +104,24 @@
     </ul>
     <div class="row">
       <a class="btn" id="appLink"
-         href="https://github.com/koderking25/clavinova-midi/releases/latest/download/Clavinova-MIDI-Maker.zip">Download the Mac app</a>
-      <a class="btn ghost" href="https://github.com/koderking25/clavinova-midi#the-mac-app">How to install it</a>
+         href="https://github.com/koderking25/clavinova-midi/releases/latest/download/Clavinova-MIDI-Maker.dmg">Download the Mac app</a>
+      <span class="muted">Apple Silicon Mac. Free. Nothing uploaded, nobody's server.</span>
     </div>
-    <p class="muted" style="margin-top:10px">Apple Silicon Mac. Still nothing uploaded, still nobody's server.
-      The app is not signed with a paid Apple account, so macOS blocks a downloaded copy the first
-      time and says it "could not verify" it. The install command avoids that completely, because it
-      builds the app on your own Mac instead of downloading one. If you take the zip instead: open it
-      once, let it get refused, then go to <b>System Settings</b> &rarr; <b>Privacy &amp; Security</b>,
-      scroll down and click <b>Open Anyway</b>. You do that once, ever.</p>
+
+    <h3 style="margin:22px 0 6px">Installing it takes a minute</h3>
+    <ol style="margin:0 0 10px; padding-left:20px; line-height:1.7">
+      <li><b>Open the file you downloaded</b> and drag the app onto the Applications folder next to it.</li>
+      <li><b>Open it from Applications.</b> macOS will say it "could not verify" the app. That is expected:
+        Apple shows it for every app that has not paid Apple $99 a year to be checked, and this app is free.
+        Click <b>Done</b>.</li>
+      <li><b>Open System Settings</b> &rarr; <b>Privacy &amp; Security</b>, scroll to the bottom, click
+        <b>Open Anyway</b>, and confirm with your password or fingerprint.</li>
+    </ol>
+    <p class="muted" style="margin:0 0 8px">That is once, ever. After that it opens like any other app.
+      If you cancel the fingerprint by accident, the button disappears: just open the app once more and it comes back.</p>
+    <p class="muted" style="margin:0">Comfortable with Terminal? This installs it with no warning at all, because it
+      builds the app on your Mac instead of downloading one:<br>
+      <code style="user-select:all">curl -fsSL https://raw.githubusercontent.com/koderking25/clavinova-midi/main/mac/install.sh | bash</code></p>
   </section>
 
   <footer>

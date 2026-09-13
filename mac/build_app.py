@@ -21,7 +21,7 @@ ROOT = os.path.dirname(HERE)
 BUILD = os.path.join(HERE, "build")
 NAME = "Clavinova MIDI Maker"
 APP = os.path.join(BUILD, f"{NAME}.app")
-VERSION = "1.0.0"
+VERSION = "1.2.0"
 
 LAUNCHER = r"""#!/bin/bash
 # Starts the app: sets up the environment on first run, then runs the local

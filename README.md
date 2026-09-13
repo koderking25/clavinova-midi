@@ -142,11 +142,12 @@ and puts **Clavinova MIDI Maker** in your Applications folder. Opening it the
 first time downloads the AI models, which takes about ten minutes and needs
 [Homebrew](https://brew.sh) for the audio tools.
 
-There is also a zip of the app on the
-[releases page](https://github.com/koderking25/clavinova-midi/releases/latest).
-It is not signed with an Apple developer account (that needs Apple's paid
-programme), so macOS blocks a downloaded copy and says it "could not verify" the
-app. Open it once and let it be refused, then go to **System Settings** ->
+Or download the disk image from the
+[releases page](https://github.com/koderking25/clavinova-midi/releases/latest):
+open it and drag the app onto the Applications folder beside it. The app is not
+notarised (that needs Apple's paid developer programme, $99 a year, which is the
+only way to make the warning below disappear for everyone), so macOS blocks a
+downloaded copy and says it "could not verify" the app. Open it once and let it be refused, then go to **System Settings** ->
 **Privacy & Security**, scroll down to the message about the app and click
 **Open Anyway**. Once only.
 
@@ -159,11 +160,15 @@ it never gets flagged. To clear the flag on a copy you already downloaded:
 xattr -dr com.apple.quarantine "/Applications/Clavinova MIDI Maker.app"
 ```
 
-To rebuild the app after changing the code:
+To rebuild the app and its disk image after changing the code:
 
 ```bash
 .venv/bin/python mac/build_app.py
+.venv/bin/python mac/build_dmg.py
 ```
+
+`build_dmg.py` mounts the finished image and refuses to finish unless the app, the
+Applications shortcut, the window layout and the background are all inside.
 
 ## The browser version (no install, nothing uploaded)
 
