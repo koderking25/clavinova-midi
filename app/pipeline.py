@@ -250,6 +250,17 @@ def run_in_child(job, work_root, lib_dir):
             raise UserError("Your Mac ran out of memory while making this song. Close other apps "
                             "(browsers with many tabs use a lot) and try again.")
         raise ChildFailed(f"the song's process stopped unexpectedly (exit code {outcome[1]})")
+    # A full disk surfaces as nonsense like "LibsndfileError: System error", which tells
+    # nobody anything. Two signals have to agree: what the error said, or how much room is
+    # actually left where the song was being made.
+    text = str(outcome[1]).lower()
+    out_of_space = ("no space left" in text or "errno 28" in text
+                    or ("system error" in text and shutil.disk_usage(work_root).free < 500 * 1024 * 1024))
+    if out_of_space:
+        free = shutil.disk_usage(work_root).free
+        raise UserError(f"Your Mac ran out of space while making this song ({free / 1e9:.1f} GB left). "
+                        f"Free some up and try again. Restarting usually returns several GB, because "
+                        f"macOS keeps memory on the disk.")
     raise ChildFailed(outcome[1], outcome[2])
 
 
@@ -349,8 +360,11 @@ def _rms(x):
 
 
 def decode_audio(src, dst):
+    # 16 bit rather than 32 bit float halves the biggest temporary file: 11 MB a minute
+    # instead of 21. The audio is normalised straight after this, and 16 bit carries far
+    # more range than any of the models can hear, but the accuracy tests are what decide.
     cmd = [FFMPEG, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
-           "-vn", "-sn", "-dn", "-ac", "2", "-ar", str(SR), "-t", str(MAX_SECONDS), "-c:a", "pcm_f32le", str(dst)]
+           "-vn", "-sn", "-dn", "-ac", "2", "-ar", str(SR), "-t", str(MAX_SECONDS), "-c:a", "pcm_s16le", str(dst)]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
     except subprocess.TimeoutExpired:
@@ -456,7 +470,11 @@ def run_transkun(x):
 
 
 def run_basic_pitch(stem, path, fmin, fmax):
-    sf.write(path, stem, SR, subtype="FLOAT")
+    # Basic Pitch mixes to mono itself before doing anything, so handing it mono 16 bit
+    # feeds it the same signal for a quarter of the disk: a 4 minute stem is about 21 MB
+    # instead of about 85 MB. That matters on a Mac that is nearly full.
+    mono = stem.mean(axis=1) if getattr(stem, "ndim", 1) > 1 else stem
+    sf.write(path, mono, SR, subtype="PCM_16")
     from basic_pitch.inference import predict
     _, pm, _ = predict(str(path), MODELS.basic_pitch(), minimum_frequency=fmin, maximum_frequency=fmax)
     return [mx.Note(n.start, n.end, n.pitch, n.velocity) for i in pm.instruments for n in i.notes]
@@ -549,9 +567,17 @@ def process(job, work_root, lib_dir, on_update):
     lib_dir = Path(lib_dir)
     meta_dir = lib_dir / ".clavinova"
     meta_dir.mkdir(parents=True, exist_ok=True)
+    # What a song needs depends on how long it is: the separated parts are written out
+    # while it works. A flat limit passed a nearly full Mac and then ran out mid song.
+    minutes = max(1.0, float(job.duration_hint or 240) / 60.0)
+    per_minute = 30 if job.mode in ("arrange", "band") else 10
+    needed = int((300 + per_minute * minutes) * 1024 * 1024)
     free = shutil.disk_usage(work).free
-    if free < 600 * 1024 * 1024:
-        raise UserError(f"Your Mac is almost out of space ({free / 1e9:.1f} GB free). Free up at least 1 GB and try again.")
+    if free < needed:
+        raise UserError(
+            f"This song needs about {needed / 1e9:.1f} GB of free space and your Mac has "
+            f"{free / 1e9:.1f} GB. Free some up and try again. Restarting usually returns "
+            f"several GB, because macOS keeps memory on the disk.")
 
     seconds = float(job.duration_hint or 240)
     prog = Progress(job, plan_stages(job, seconds), on_update)
