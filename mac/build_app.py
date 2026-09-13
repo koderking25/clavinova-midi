@@ -160,6 +160,11 @@ def main():
         "CFBundleExecutable": "launch",
         "CFBundleIconFile": "icon",
         "LSMinimumSystemVersion": "12.0",
+        # The executable is a shell script, which declares no architecture. Left to guess,
+        # macOS once launched it through Rosetta as an Intel app, and it hung "not responding".
+        # This app only runs on Apple Silicon, so say so and forbid Rosetta outright.
+        "LSRequiresNativeExecution": True,
+        "LSArchitecturePriority": ["arm64"],
         "NSHighResolutionCapable": True,
         "LSApplicationCategoryType": "public.app-category.music",
         "NSHumanReadableCopyright": "Made with Claude Code",
