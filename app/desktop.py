@@ -7,11 +7,14 @@ saves into your Downloads folder, and a window that remembers its size.
 
     python app/desktop.py
 """
-import os
-import sys
-import threading
 import time
-import urllib.request
+
+STARTED = time.time()                        # for the "window shown after" line in the log
+
+import os  # noqa: E402
+import sys  # noqa: E402
+import threading  # noqa: E402
+import urllib.request  # noqa: E402
 
 APP = os.path.dirname(os.path.abspath(__file__))
 
@@ -221,14 +224,63 @@ def already_running(url):
         return False
 
 
-def main():
-    import server
-    url = f"http://127.0.0.1:{server.PORT}"
+LOADING_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<style>
+  /* Same colours and piano keys banner as the app, so the switch to it is seamless. */
+  :root { color-scheme: light dark; --bg: #f5f1e8; --ink: #1d1b17; --muted: #6c655a; --line: #e3dac9;
+          --accent: #9b2c1f; --key-w: #fffdf8; --key-b: #1d1b17; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #171512; --ink: #f1ece3; --muted: #a79f92; --line: #3a352e;
+          --accent: #e0695a; --key-w: #e9e3d8; --key-b: #0d0c0a; } }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+               font: 15px -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  .keys { height: 26px; background: repeating-linear-gradient(90deg, transparent 0 21px, var(--line) 21px 22px), var(--key-w);
+          position: relative; overflow: hidden; border-bottom: 1px solid var(--line); }
+  .keys::after { content: ""; position: absolute; inset: 0 0 9px 0; background: repeating-linear-gradient(90deg,
+    transparent 0 15px, var(--key-b) 15px 28px, transparent 28px 37px, var(--key-b) 37px 50px, transparent 50px 81px,
+    var(--key-b) 81px 94px, transparent 94px 103px, var(--key-b) 103px 116px, transparent 116px 125px,
+    var(--key-b) 125px 138px, transparent 138px 154px); }
+  main { height: calc(100% - 27px); display: grid; place-content: center; text-align: center; gap: 14px; }
+  h1 { font: 600 26px Georgia, "Times New Roman", serif; margin: 0; }
+  p { margin: 0; color: var(--muted); }
+  .bar { width: 220px; height: 4px; margin: 6px auto 0; border-radius: 4px; overflow: hidden; background: rgba(128,128,128,.25); }
+  .bar i { display: block; width: 40%; height: 100%; background: var(--accent); border-radius: 4px; animation: slide 1.1s ease-in-out infinite; }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+  .err { color: var(--accent); max-width: 420px; line-height: 1.5; }
+</style></head><body><div class="keys"></div>
+<main><h1>Clavinova MIDI Maker</h1><p id="msg">Starting up&hellip;</p><div class="bar" id="bar"><i></i></div></main>
+</body></html>"""
 
-    if not already_running(url):                    # a second copy just shows the first one's pages
+
+def show_problem(web, text):
+    """Replace the loading screen with a plain explanation, instead of quitting silently."""
+    import json
+    js = (f"document.getElementById('msg').className='err';"
+          f"document.getElementById('msg').textContent={json.dumps(text)};"
+          f"document.getElementById('bar').remove();")
+    web.evaluateJavaScript_completionHandler_(js, None)
+
+
+def start_engine(web, url):
+    """Runs off the main thread: start the engine, then point the window at it."""
+    from PyObjCTools import AppHelper
+    if not already_running(url):                      # a second copy just uses the first one's engine
         threading.Thread(target=serve_in_background, daemon=True).start()
-        if not wait_for_server(url):
-            sys.exit("The engine did not start. See ~/Library/Logs/Clavinova MIDI Maker.log")
+    if wait_for_server(url):
+        print(f"engine ready after {time.time() - STARTED:.1f} s", flush=True)
+        AppHelper.callAfter(web.loadRequest_, NSURLRequest.requestWithURL_(NSURL.URLWithString_(url)))
+    else:
+        print("the engine did not start within 90 s", flush=True)
+        AppHelper.callAfter(show_problem, web, "The app could not start its engine. Quit it with Cmd+Q and "
+                            "open it again. If it keeps happening, the details are in "
+                            "~/Library/Logs/Clavinova MIDI Maker.log")
+
+
+def main():
+    # The window comes first and the engine loads behind it. Opening used to wait for the whole
+    # engine before anything appeared, and a Mac that is busy (just restarted, or scanning the
+    # app) turned that silence into "the application is not responding".
+    port = int(os.environ.get("CLAVINOVA_PORT", "8765"))
+    url = f"http://127.0.0.1:{port}"
 
     claim_identity()                                  # must happen before the application exists
     app = NSApplication.sharedApplication()
@@ -260,7 +312,11 @@ def main():
     web.setAutoresizingMask_(1 << 1 | 1 << 4)                # follows the window when resized
     web.setUIDelegate_(delegate)
     web.setNavigationDelegate_(delegate)
-    web.loadRequest_(NSURLRequest.requestWithURL_(NSURL.URLWithString_(url)))
+    try:
+        web.setValue_forKey_(False, "drawsBackground")      # no white flash between screens in dark mode
+    except Exception:  # noqa: BLE001
+        pass
+    web.loadHTMLString_baseURL_(LOADING_PAGE, None)
     window.contentView().addSubview_(web)
 
     window.makeKeyAndOrderFront_(None)
@@ -272,7 +328,9 @@ def main():
     info = NSBundle.mainBundle().infoDictionary() or {}
     print(f"window open: title={window.title()!r} size={int(width)}x{int(height)} "
           f"visible={bool(window.isVisible())}", flush=True)
+    print(f"window shown after {time.time() - STARTED:.1f} s", flush=True)
     print(f"identity: menu bar name={info.get('CFBundleName')!r}, dock icon={icon_path}", flush=True)
+    threading.Thread(target=start_engine, args=(web, url), daemon=True).start()
     app.run()
 
 

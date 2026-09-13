@@ -362,6 +362,10 @@ class Updater:
         for need in ("Contents/MacOS/launch", "Contents/Resources/app/desktop.py", "Contents/Resources/app/server.py"):
             if not (Path(app) / need).exists():
                 raise UpdateError("The update is missing part of the app, so it was not installed.")
+        # The program macOS actually starts must exist and be runnable, or the new app would not open.
+        exe = Path(app) / "Contents" / "MacOS" / str(info.get("CFBundleExecutable") or "")
+        if not info.get("CFBundleExecutable") or not exe.is_file() or not os.access(exe, os.X_OK):
+            raise UpdateError("The update's app would not start, so it was not installed.")
         r = subprocess.run(["codesign", "--verify", str(app)], capture_output=True, text=True, timeout=120)
         if r.returncode != 0:
             raise UpdateError("The update's signature check failed, so it was not installed.")

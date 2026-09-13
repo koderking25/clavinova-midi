@@ -21,7 +21,7 @@ ROOT = os.path.dirname(HERE)
 BUILD = os.path.join(HERE, "build")
 NAME = "Clavinova MIDI Maker"
 APP = os.path.join(BUILD, f"{NAME}.app")
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 
 LAUNCHER = r"""#!/bin/bash
 # Starts the app: sets up the environment on first run, then opens the app's own
@@ -71,6 +71,89 @@ say "opening the window"
 # desktop.py is the app itself: a real Mac window with the engine running inside it.
 # No browser, no tab. Quitting the window quits everything.
 exec "$VENV/bin/python" "$RES/app/desktop.py" >>"$LOG" 2>&1
+"""
+
+# The app's real front door: a tiny native Apple Silicon program. A shell script as the main
+# executable declares no architecture, and macOS once launched it through Rosetta as an Intel
+# app, where it hung and every double click said "not responding". This program is arm64, so
+# macOS knows exactly what it is. It sets up the same environment as the script and hands
+# straight over to Python; only a first launch, with nothing installed yet, goes via the script.
+NATIVE_LAUNCHER_C = r"""
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <mach-o/dyld.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
+
+static void make_dirs(const char *path) {
+    char tmp[PATH_MAX];
+    snprintf(tmp, sizeof tmp, "%s", path);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') { *p = 0; mkdir(tmp, 0755); *p = '/'; }
+    }
+    mkdir(tmp, 0755);
+}
+
+static void parent(char *path) {
+    char *slash = strrchr(path, '/');
+    if (slash) *slash = 0;
+}
+
+int main(void) {
+    char exe[PATH_MAX], real[PATH_MAX];
+    uint32_t size = sizeof exe;
+    if (_NSGetExecutablePath(exe, &size) != 0 || !realpath(exe, real)) return 1;
+    char macos[PATH_MAX], contents[PATH_MAX];
+    snprintf(macos, sizeof macos, "%s", real);
+    parent(macos);                                         /* .../Contents/MacOS */
+    snprintf(contents, sizeof contents, "%s", macos);
+    parent(contents);                                      /* .../Contents */
+
+    const char *home = getenv("HOME");
+    if (!home || !*home) return 1;
+    char support[PATH_MAX], work[PATH_MAX], state[PATH_MAX], pycache[PATH_MAX];
+    char logdir[PATH_MAX], logfile[PATH_MAX], python[PATH_MAX], desktop[PATH_MAX], script[PATH_MAX];
+    snprintf(support, sizeof support, "%s/Library/Application Support/Clavinova MIDI Maker", home);
+    snprintf(work, sizeof work, "%s/work", support);
+    snprintf(state, sizeof state, "%s/state", support);
+    snprintf(pycache, sizeof pycache, "%s/pycache", support);
+    snprintf(logdir, sizeof logdir, "%s/Library/Logs", home);
+    snprintf(logfile, sizeof logfile, "%s/Clavinova MIDI Maker.log", logdir);
+    snprintf(python, sizeof python, "%s/venv/bin/python", support);
+    snprintf(desktop, sizeof desktop, "%s/Resources/app/desktop.py", contents);
+    snprintf(script, sizeof script, "%s/launch", macos);
+
+    const char *old_path = getenv("PATH");
+    char path[8192];
+    snprintf(path, sizeof path, "/opt/homebrew/bin:/usr/local/bin:%s",
+             old_path && *old_path ? old_path : "/usr/bin:/bin:/usr/sbin:/sbin");
+    setenv("PATH", path, 1);
+    setenv("CLAVINOVA_WORK", work, 1);
+    setenv("CLAVINOVA_STATE", state, 1);
+    setenv("PYTHONPYCACHEPREFIX", pycache, 1);
+    make_dirs(work);
+    make_dirs(state);
+    make_dirs(logdir);
+
+    if (access(python, X_OK) != 0) {                        /* first launch: the script sets things up */
+        execl("/bin/bash", "/bin/bash", script, (char *)NULL);
+        return 127;
+    }
+    int fd = open(logfile, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd >= 0) { dup2(fd, STDOUT_FILENO); dup2(fd, STDERR_FILENO); close(fd); }
+    char stamp[32];
+    time_t now = time(NULL);
+    strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", localtime(&now));
+    dprintf(STDOUT_FILENO, "%s opening the window\n", stamp);
+    execl(python, python, desktop, (char *)NULL);
+    dprintf(STDERR_FILENO, "%s could not start Python (%s)\n", stamp, strerror(errno));
+    return 127;
+}
 """
 
 SETUP = r"""#!/bin/bash
@@ -150,6 +233,19 @@ def main():
         f.write(LAUNCHER)
     os.chmod(launch, 0o755)
 
+    executable = "launch"                         # fallback: the script, if no compiler is available
+    clang = shutil.which("clang")
+    if clang:
+        native = os.path.join(APP, "Contents", "MacOS", NAME)
+        src = os.path.join(BUILD, "launcher.c")
+        with open(src, "w") as f:
+            f.write(NATIVE_LAUNCHER_C)
+        run(clang, "-O2", "-arch", "arm64", "-mmacosx-version-min=12.0", "-Wall", "-Werror", "-o", native, src)
+        os.remove(src)
+        executable = NAME
+    else:
+        print("  no C compiler found: the app starts through its script (it still works)")
+
     plist = {
         "CFBundleName": NAME,
         "CFBundleDisplayName": NAME,
@@ -157,7 +253,7 @@ def main():
         "CFBundleVersion": VERSION,
         "CFBundleShortVersionString": VERSION,
         "CFBundlePackageType": "APPL",
-        "CFBundleExecutable": "launch",
+        "CFBundleExecutable": executable,
         "CFBundleIconFile": "icon",
         "LSMinimumSystemVersion": "12.0",
         # The executable is a shell script, which declares no architecture. Left to guess,
