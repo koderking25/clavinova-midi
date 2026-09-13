@@ -22,11 +22,14 @@ double-click on the app runs it for you.
 
 ## Start it
 
-Double-click **Clavinova MIDI Maker.command** in this folder. A Terminal window
-opens (keep it open while you use the app) and your browser opens the app at
-http://127.0.0.1:8765. Close the Terminal window to stop it.
+Open **Clavinova MIDI Maker** from your Applications folder (see [The Mac
+app](#the-mac-app) below to install it there). It opens as a normal Mac window
+with its own Dock icon and menu bar. Cmd+Q quits it, which stops everything.
 
 The first start takes about 20 seconds while the AI models load.
+
+There is also **Clavinova MIDI Maker.command** in this folder, which does the
+same thing from a checkout of the code.
 
 ## Use it
 
@@ -178,8 +181,10 @@ uploaded: the song never leaves the computer it is played on.
 ```
 
 This converts the same model the Mac app uses and checks every piece against
-PyTorch before keeping it. The files land in `web/models/` and stay out of the
-repo.
+PyTorch before keeping it. The files land in `web/models/` and are committed,
+because the website has to serve them. The largest one is split into four
+pieces, since no static host will serve a 63 MB file as one lump, and the
+browser joins them back together.
 
 ### Run it locally
 
@@ -207,6 +212,10 @@ whose root is the site itself:
 That writes `dist/midify-site/` and `dist/midify-site.zip` (about 55 MB), and refuses to
 finish if `index.html` is not at the root or any file is over Cloudflare's 25 MiB limit.
 In the Cloudflare dashboard, drag the zip or the folder onto the upload box.
+
+Upload that package, never the repository itself. The uploader refuses a folder that
+looks like it needs building ("this uploader does not yet support projects that require
+a build process"), and it decides that by spotting config files at the root.
 
 The backbone is split into four pieces because of that 25 MiB limit, and the browser
 joins them again. `_headers` sends the two cross origin headers that let the page use
