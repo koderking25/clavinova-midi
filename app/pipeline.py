@@ -465,7 +465,9 @@ def run_transkun(x):
     if ins is None:
         return [], []
     ns = [mx.Note(n.start, n.end, n.pitch, n.velocity) for n in ins.notes if 21 <= n.pitch <= 108]
-    pedal = sorted((c.time, c.value) for c in ins.control_changes if c.number == 64)
+    # Both pedals the model hears: sustain (64) and the soft pedal (67). Only sustain used to
+    # be kept, so every soft passage lost its una corda. Each press is (time, pedal, depth).
+    pedal = sorted((c.time, c.number, c.value) for c in ins.control_changes if c.number in (64, 67))
     return ns, pedal
 
 

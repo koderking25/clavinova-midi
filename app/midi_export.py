@@ -94,9 +94,13 @@ def write_smf(parts, path, bpm=120.0, title="Song"):
         add(SETUP_TICK, 4, mido.Message("control_change", channel=ch, control=7, value=int(part.volume)))
         add(SETUP_TICK, 4, mido.Message("control_change", channel=ch, control=11, value=127))
         add(SETUP_TICK, 4, mido.Message("control_change", channel=ch, control=64, value=0))
-        for t, val in part.pedal:
+        add(SETUP_TICK, 4, mido.Message("control_change", channel=ch, control=67, value=0))
+        for event in part.pedal:
+            # (time, value) is the sustain pedal; (time, controller, value) names the pedal,
+            # which is how the soft pedal (67) travels alongside it.
+            t, cc, val = (event[0], 64, event[1]) if len(event) == 2 else event
             add(LEAD_IN_TICKS + _tick(t, bpm), 5,
-                mido.Message("control_change", channel=ch, control=64, value=int(min(127, max(0, val)))))
+                mido.Message("control_change", channel=ch, control=int(cc), value=int(min(127, max(0, val)))))
         for on, off, pitch, vel in part_ticks(part, bpm):
             add(on, 7, mido.Message("note_on", channel=ch, note=pitch, velocity=vel))
             add(off, 6, mido.Message("note_off", channel=ch, note=pitch, velocity=0))
