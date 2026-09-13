@@ -85,6 +85,15 @@ input[type=search]:focus, select:focus, button:focus-visible { outline: 2px soli
 .song .t { font-weight: 600; }
 .song audio { width: 100%; margin-top: 8px; height: 36px; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.tabs { display: flex; gap: 6px; }
+.tabs button { background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 7px 16px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.tabs button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+main > [role=tabpanel] { display: contents; }
+main > [role=tabpanel][hidden] { display: none; }
+#hist-q { width: 100%; margin: 0 0 12px; }
+.day { font: 600 12px/1.2 -apple-system, system-ui, sans-serif; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 18px 0 6px; }
+.day:first-child { margin-top: 0; }
+.day + .song { border-top: 0; padding-top: 2px; }
 .drive { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; border: 1.5px solid var(--line); background: var(--bg); cursor: pointer; }
 .drive.sel { border-color: var(--accent); }
 .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; flex: none; }
@@ -106,6 +115,12 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
 <div class="banner" id="banner"></div>
 
 <main>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button role="tab" id="tab-make" aria-controls="panel-make">Make a song</button>
+    <button role="tab" id="tab-history" aria-controls="panel-history">History<span id="tab-history-count"></span></button>
+  </nav>
+
+  <div id="panel-make" role="tabpanel" aria-labelledby="tab-make">
   <section class="card" aria-labelledby="how-h">
     <h2 id="how-h">1. How should it sound?</h2>
     <div class="modes" role="radiogroup">
@@ -138,16 +153,26 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
     <div id="jobs"></div>
   </section>
 
-  <section class="card" aria-labelledby="drive-h">
-    <h2 id="drive-h">Flash drive</h2>
-    <div id="drives"><p class="empty">Looking for flash drives...</p></div>
+  <section class="card" id="justmade-card" hidden aria-labelledby="justmade-h">
+    <h2 id="justmade-h">Just made</h2>
+    <div id="justmade"></div>
+    <p class="hint">It stays here until you start your next song. Every song you make is also kept in History.</p>
   </section>
+  </div>
 
+  <div id="panel-history" role="tabpanel" aria-labelledby="tab-history" hidden>
   <section class="card" aria-labelledby="lib-h">
-    <h2 id="lib-h">Your songs</h2>
+    <h2 id="lib-h">History</h2>
+    <input type="search" id="hist-q" placeholder="Search your songs" aria-label="Search your songs">
     <div id="library"><p class="empty">Loading...</p></div>
     <p class="hint">Previews play through your Mac's built-in sounds, so they are rough. The Clavinova sounds much better.
       On the Clavinova, plug the flash drive into its USB port and pick the song from the USB tab of the song list.</p>
+  </section>
+  </div>
+
+  <section class="card" aria-labelledby="drive-h">
+    <h2 id="drive-h">Flash drive</h2>
+    <div id="drives"><p class="empty">Looking for flash drives...</p></div>
   </section>
 </main>
 
@@ -276,7 +301,7 @@ function uploadFile(file) {
   xhr.onload = () => {
     let d = {}; try { d = JSON.parse(xhr.responseText); } catch {}
     if (xhr.status >= 400) { toast(d.detail || "That file could not be added.", 7000); return; }
-    if (d.imported) { S.highlight = d.imported; toast(`Added "${d.imported}" to your songs.`); refreshLibrary(); }
+    if (d.imported) { S.highlight = d.imported; S.justMade = d.imported; toast(`Added "${d.imported}". It is kept in History.`); refreshLibrary(); }
     else { toast(`Making "${file.name}". This takes a few minutes.`); refreshJobs(true); }
   };
   xhr.onerror = () => toast("Upload failed. Is the app still running?", 7000);
@@ -289,9 +314,15 @@ async function refreshJobs(soon) {
   clearTimeout(jobTimer);
   try {
     S.jobs = await api("/api/jobs");
+    // Starting a new song clears "Just made", so the Make tab only shows what you are doing now.
+    // The first look after the app opens only records what exists, so an old song never pops up.
+    const firstLook = !S.knownJobs;
+    if (!firstLook) for (const j of S.jobs)
+      if (!S.knownJobs.has(j.id) && (j.status === "queued" || j.status === "running")) { S.justMade = null; renderJustMade(); }
+    S.knownJobs = new Set(S.jobs.map(j => j.id));
     for (const j of S.jobs) if (j.status === "done" && !S.seenDone.has(j.id)) {
       S.seenDone.add(j.id);
-      if (j.result) { S.highlight = j.result.file; refreshLibrary(); }
+      if (j.result && !firstLook) { S.highlight = j.result.file; S.justMade = j.result.file; refreshLibrary(); }
     }
     renderJobs();
   } catch {}
@@ -309,7 +340,7 @@ function renderJobs() {
     let body = "";
     if (j.status === "running") body = `<div class="bar"><i style="width:${pct}%"></i></div><div class="meta">${esc(j.stage)} · ${pct}% · ${fmtEta(j.eta)}</div>`;
     else if (j.status === "queued") body = `<div class="meta">Waiting for the song before it to finish.</div>`;
-    else if (j.status === "done") body = `<div class="msg ok">Done. It is in "Your songs" below.</div>`;
+    else if (j.status === "done") body = `<div class="msg ok">Done. It is just below, and it is kept in History.</div>`;
     else if (j.status === "cancelled") body = `<div class="meta">Cancelled.</div>`;
     else if (j.status === "error") body = `<div class="msg bad">${esc(j.error)}</div>`;
     el.innerHTML = `<div class="row"><div class="grow"><b>${esc(j.title)}</b> <span class="meta">${esc(MODE_NAMES[j.mode] || j.mode)}</span></div></div>${body}`;
@@ -327,17 +358,57 @@ function renderJobs() {
   }
 }
 
-/* ---------- library ---------- */
-async function refreshLibrary() {
-  let items;
-  try { items = await api("/api/library"); } catch (e) { $("#library").innerHTML = `<div class="msg bad">${esc(e.message)}</div>`; return; }
+/* ---------- songs: "Just made" on the Make tab, every song in History ---------- */
+S.library = []; S.justMade = null; S.knownJobs = null; S.query = "";
+
+function dayLabel(ts) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+  if (ts >= today) return "Today";
+  if (ts >= today - 86400) return "Yesterday";
+  if (ts >= today - 6 * 86400) return "Earlier this week";
+  return new Date(ts * 1000).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
+function renderHistory() {
   const box = $("#library"); box.innerHTML = "";
-  if (!items.length) { box.innerHTML = `<p class="empty">No songs yet. Search for one above or drop in a file.</p>`; return; }
+  $("#tab-history-count").textContent = S.library.length ? ` (${S.library.length})` : "";
+  if (!S.library.length) { box.innerHTML = `<p class="empty">Every song you make will be kept here.</p>`; return; }
+  const q = S.query.trim().toLowerCase();
+  const items = S.library.filter(it => !q || `${it.title} ${it.file}`.toLowerCase().includes(q));
+  if (!items.length) { box.innerHTML = `<p class="empty">No songs match "${esc(S.query)}".</p>`; return; }
+  let group = null;
   for (const it of items) {
+    const g = dayLabel(it.modified);
+    if (g !== group) { group = g; const h = document.createElement("h3"); h.className = "day"; h.textContent = g; box.append(h); }
+    box.append(songCard(it));
+  }
+}
+
+function renderJustMade() {
+  const it = S.justMade && S.library.find(x => x.file === S.justMade);
+  $("#justmade-card").hidden = !it;
+  const box = $("#justmade"); box.innerHTML = "";
+  if (it) box.append(songCard(it));
+}
+
+async function refreshLibrary() {
+  try { S.library = await api("/api/library"); }
+  catch (e) { $("#library").innerHTML = `<div class="msg bad">${esc(e.message)}</div>`; return; }
+  renderHistory(); renderJustMade();
+  if (S.highlight) {
+    const n = $("#justmade .song.new") || $("#library .song.new");
+    if (n && n.offsetParent) n.scrollIntoView({ behavior: "smooth", block: "center" });
+    S.highlight = null;
+  }
+}
+
+function songCard(it) {
+  {
     const el = document.createElement("div"); el.className = "song" + (it.file === S.highlight ? " new" : "");
     const parts = (it.parts || []).map(p => `${p.name} (${p.notes})`).join(", ");
     el.innerHTML = `<div class="t">${esc(it.title)}</div>
-      <div class="meta">${esc(it.file)} · ${esc(MODE_NAMES[it.mode] || "MIDI")}${it.seconds ? " · " + fmtDur(it.seconds) : ""}${it.bpm ? " · " + Math.round(it.bpm) + " BPM" : ""}${parts ? " · " + esc(parts) : ""}</div>`;
+      <div class="meta">${esc(MODE_NAMES[it.mode] || "MIDI")}${it.seconds ? " · " + fmtDur(it.seconds) : ""}${it.bpm ? " · " + Math.round(it.bpm) + " BPM" : ""}${parts ? " · " + esc(parts) : ""}</div>`;
     const acts = document.createElement("div"); acts.className = "actions";
     const enc = encodeURIComponent(it.file);
     if (it.preview) {
@@ -352,10 +423,10 @@ async function refreshLibrary() {
     rv.onclick = () => api(`/api/library/${enc}/reveal`, { method: "POST" }).catch(e => toast(e.message));
     const rm = document.createElement("button"); rm.className = "small"; rm.textContent = "Remove";
     rm.onclick = async () => { if (!confirm(`Move "${it.file}" to the Trash?`)) return;
-      try { await api(`/api/library/${enc}/trash`, { method: "POST" }); toast("Moved to the Trash."); refreshLibrary(); } catch (e) { toast(e.message); } };
-    acts.append(send, dl, rv, rm); el.append(acts); box.append(el);
+      try { await api(`/api/library/${enc}/trash`, { method: "POST" }); if (S.justMade === it.file) S.justMade = null; toast("Moved to the Trash."); refreshLibrary(); } catch (e) { toast(e.message); } };
+    acts.append(send, dl, rv, rm); el.append(acts);
+    return el;
   }
-  if (S.highlight) { const n = $(".song.new"); if (n) n.scrollIntoView({ behavior: "smooth", block: "center" }); S.highlight = null; }
 }
 
 /* ---------- flash drives ---------- */
@@ -436,6 +507,19 @@ $("#lib-btn").addEventListener("click", () => api("/api/open-library", { method:
 
 initModes();
 refreshStatus(); setInterval(refreshStatus, 5000);
+function showTab(name) {
+  for (const t of ["make", "history"]) {
+    $(`#panel-${t}`).hidden = t !== name;
+    $(`#tab-${t}`).classList.toggle("on", t === name);
+    $(`#tab-${t}`).setAttribute("aria-selected", String(t === name));
+  }
+  store.set("tab", name);
+}
+$("#tab-make").onclick = () => showTab("make");
+$("#tab-history").onclick = () => showTab("history");
+$("#hist-q").oninput = (e) => { S.query = e.target.value; renderHistory(); };
+showTab(store.get("tab", "make") === "history" ? "history" : "make");
+
 refreshDrives(); setInterval(refreshDrives, 4000);
 refreshLibrary(); refreshJobs();
 </script>
