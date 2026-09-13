@@ -249,3 +249,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # The AI runtime sometimes throws while Python is shutting down ("recursive_mutex lock
+    # failed"), long after the work and every check have finished. That crash became the
+    # script's exit status (134), so anything chained after it saw a good build as a
+    # failure. Everything above has already run, so leave immediately and report honestly.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)

@@ -18,3 +18,5 @@ web/test/
 mac/build/
 
 .DS_Store
+# The upload package for the website, built by web/package_site.py
+dist/

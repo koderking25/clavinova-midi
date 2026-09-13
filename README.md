@@ -182,6 +182,25 @@ sends the two headers (`Cross-Origin-Opener-Policy` and
 Without them the browser allows one core and the work takes twice as long.
 Cloudflare Pages and Workers can send the same two headers.
 
+### Putting the website on Cloudflare
+
+Cloudflare serves whatever you upload as the site root. Uploading this repository puts
+the page at `/web/` and leaves `/` a 404, which is the one trap here. Build a package
+whose root is the site itself:
+
+```bash
+.venv/bin/python web/export_models.py   # if the model files are not built yet
+.venv/bin/python web/package_site.py
+```
+
+That writes `dist/midify-site/` and `dist/midify-site.zip` (about 55 MB), and refuses to
+finish if `index.html` is not at the root or any file is over Cloudflare's 25 MiB limit.
+In the Cloudflare dashboard, drag the zip or the folder onto the upload box.
+
+The backbone is split into four pieces because of that 25 MiB limit, and the browser
+joins them again. `_headers` sends the two cross origin headers that let the page use
+every processor core; without them it still works, on one core, at about half the speed.
+
 ### Speed, measured on this Mac (M1, 8 GB, 8 cores)
 
 | | 27 seconds of audio |
