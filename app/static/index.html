@@ -85,6 +85,10 @@ input[type=search]:focus, select:focus, button:focus-visible { outline: 2px soli
 .song .t { font-weight: 600; }
 .song audio { width: 100%; margin-top: 8px; height: 36px; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.update { max-width: 840px; margin: 0 auto 14px; display: flex; gap: 12px; align-items: center; padding: 12px 16px;
+          background: var(--card); border: 1px solid var(--accent); border-radius: var(--radius); }
+.update .grow { flex: 1; }
+.update .link { color: var(--ink); text-decoration: underline; white-space: nowrap; }
 .tabs { display: flex; gap: 6px; }
 .tabs button { background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 7px 16px; font-weight: 600; color: var(--muted); cursor: pointer; }
 .tabs button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
@@ -113,6 +117,11 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
   <p class="sub">Type a song or drop in a recording. Get a MIDI file your CVP-503 can play from a flash drive.</p>
 </header>
 <div class="banner" id="banner"></div>
+<div class="update" id="update-card" hidden role="status" aria-live="polite">
+  <div class="grow" id="update-text"></div>
+  <a class="link" id="update-notes" href="#" target="_blank" rel="noopener" hidden>What's new</a>
+  <button class="small primary" id="update-go" hidden>Update now</button>
+</div>
 
 <main>
   <nav class="tabs" role="tablist" aria-label="Sections">
@@ -182,6 +191,8 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
   <span id="st-ytdlp"></span>
   <button class="link" id="update-btn">Update downloader</button>
   <button class="link" id="lib-btn">Open songs folder</button>
+  <span id="st-version"></span>
+  <button class="link" id="check-update-btn" hidden>Check for updates</button>
 </footer>
 
 <script>
@@ -506,6 +517,47 @@ $("#update-btn").addEventListener("click", async e => {
 $("#lib-btn").addEventListener("click", () => api("/api/open-library", { method: "POST" }).catch(e => toast(e.message)));
 
 initModes();
+/* ---------- updates ---------- */
+const verNum = (v) => (v || "").split(".").reduce((a, n) => a * 1000 + (parseInt(n, 10) || 0), 0);
+function renderUpdate(u) {
+  const card = $("#update-card"), text = $("#update-text"), go = $("#update-go"), notes = $("#update-notes");
+  $("#st-version").textContent = u.current ? `Version ${u.current}` : "";
+  $("#check-update-btn").hidden = !u.current;
+  notes.hidden = !u.notes_url || !["available", "error"].includes(u.state);
+  if (u.notes_url) notes.href = u.notes_url;
+  go.hidden = true; go.disabled = false;
+  const newer = u.latest && u.current && verNum(u.latest) > verNum(u.current);
+  let msg = null;
+  if (u.state === "available") {
+    msg = u.can_install ? `Version ${u.latest} is ready. It installs in a few seconds and the app reopens by itself.`
+                        : `Version ${u.latest} is available from the website.`;
+    go.hidden = !u.can_install; go.textContent = "Update now";
+  } else if (u.state === "downloading") {
+    msg = `Downloading version ${u.latest}... ${Math.round((u.progress || 0) * 100)}%`;
+  } else if (u.state === "installing") {
+    msg = `Installing version ${u.latest}. The app will close and reopen by itself.`;
+  } else if (u.state === "error" && u.error) {
+    msg = u.error;
+    if (newer && u.can_install) { go.hidden = false; go.textContent = "Try again"; }
+  }
+  card.hidden = !msg; text.textContent = msg || "";
+}
+async function refreshUpdate() { try { renderUpdate(await api("/api/update")); } catch {} }
+$("#update-go").onclick = async () => {
+  const b = $("#update-go"); b.disabled = true;
+  try { renderUpdate(await api("/api/update/install", { method: "POST" })); }
+  catch (e) { toast(e.message, 7000); b.disabled = false; }
+};
+$("#check-update-btn").onclick = async () => {
+  const b = $("#check-update-btn"); b.disabled = true; b.textContent = "Checking...";
+  try {
+    const u = await api("/api/update/check", { method: "POST" }); renderUpdate(u);
+    if (u.state === "up_to_date") toast(`You have the latest version (${u.current}).`);
+  } catch (e) { toast(e.message, 6000); }
+  finally { b.disabled = false; b.textContent = "Check for updates"; }
+};
+refreshUpdate(); setInterval(refreshUpdate, 3000);
+
 refreshStatus(); setInterval(refreshStatus, 5000);
 function showTab(name) {
   for (const t of ["make", "history"]) {

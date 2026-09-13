@@ -160,6 +160,29 @@ it never gets flagged. To clear the flag on a copy you already downloaded:
 xattr -dr com.apple.quarantine "/Applications/Clavinova MIDI Maker.app"
 ```
 
+### Updates install themselves
+
+From version 1.4.0 the app keeps itself up to date. It checks this repository's
+releases when it opens (at most every 6 hours, politely) and shows **Update
+now** when a newer version exists. One click downloads it, and the app closes
+and reopens on the new version in a few seconds. There is also **Check for
+updates** at the bottom of the window.
+
+A failed update never leaves you without a working app:
+
+- The download must match the size and SHA-256 fingerprint GitHub records for
+  the release file, or it is thrown away.
+- The app inside must be this app, exactly the release's version, with an
+  intact signature.
+- The new copy is prepared beside the old one. The old one is moved aside, not
+  deleted, until the new one is in place and passes its signature check. Any
+  step that fails puts the old app back.
+
+Publishing a release the updater will accept: bump `VERSION` in
+`mac/build_app.py`, build the app and the disk image, and attach the disk image
+to a release tagged `v` plus that version, named exactly
+`Clavinova-MIDI-Maker.dmg`. A mismatched tag or file name is refused.
+
 To rebuild the app and its disk image after changing the code:
 
 ```bash

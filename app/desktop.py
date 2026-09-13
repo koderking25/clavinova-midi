@@ -14,6 +14,15 @@ import time
 import urllib.request
 
 APP = os.path.dirname(os.path.abspath(__file__))
+
+# Inside the .app, compiled Python must not be written next to the code: added files break the
+# app's signature. The launcher already sets this; this covers any other way of starting it,
+# before a single app module is imported. The environment copy reaches the song processes too.
+if ".app/Contents/" in APP and not os.environ.get("PYTHONPYCACHEPREFIX"):
+    _cache = os.path.expanduser("~/Library/Application Support/Clavinova MIDI Maker/pycache")
+    os.environ["PYTHONPYCACHEPREFIX"] = _cache
+    sys.pycache_prefix = _cache
+
 sys.path.insert(0, APP)
 
 import objc  # noqa: E402
@@ -63,6 +72,23 @@ class Delegate(NSObject):
         panel.setTitle_("Choose a recording")
         panel.setPrompt_("Use this")
         handler(panel.URLs() if panel.runModal() == NSModalResponseOK else None)
+
+    # Links to the outside world (BitMidi, GitHub) open in your browser. Without this they
+    # loaded inside the app's own window, with no way back to the app.
+    def webView_decidePolicyForNavigationAction_decisionHandler_(self, web_view, action, handler):
+        url = action.request().URL()
+        if url is not None and url.scheme() in ("http", "https") and url.host() not in ("127.0.0.1", "localhost"):
+            NSWorkspace.sharedWorkspace().openURL_(url)
+            handler(0)                                   # cancel here: it opened in the browser
+        else:
+            handler(1)                                   # the app's own pages load normally
+
+    def webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_(
+            self, web_view, configuration, action, features):
+        url = action.request().URL()                     # links that ask for a new window
+        if url is not None:
+            NSWorkspace.sharedWorkspace().openURL_(url)
+        return None
 
     # A MIDI file is not something to display, so it becomes a download instead.
     def webView_decidePolicyForNavigationResponse_decisionHandler_(self, web_view, response, handler):
@@ -165,9 +191,11 @@ def serve_in_background():
     import pipeline
     import server
 
+    import updater
     server.clean_leftovers()
     threading.Thread(target=pipeline.check_models_in_child, daemon=True).start()
     threading.Thread(target=server.worker, daemon=True).start()
+    threading.Thread(target=updater.startup, daemon=True).start()
     config = uvicorn.Config(server.app, host="127.0.0.1", port=server.PORT, log_level="warning")
     running = uvicorn.Server(config)
     running.install_signal_handlers = lambda: None
@@ -209,6 +237,11 @@ def main():
     delegate = Delegate.alloc().initWithServer_(url)
     app.setDelegate_(delegate)
     build_menu(app)
+
+    # The updater quits the app this way, on the main thread, so its swap script can take over.
+    import updater
+    from PyObjCTools import AppHelper
+    updater.UPDATER.quit_hook = lambda: AppHelper.callAfter(app.terminate_, None)
 
     screen = NSScreen.mainScreen().visibleFrame()
     width = min(START_SIZE[0], screen.size.width - 80)

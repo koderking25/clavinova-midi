@@ -21,32 +21,31 @@ ROOT = os.path.dirname(HERE)
 BUILD = os.path.join(HERE, "build")
 NAME = "Clavinova MIDI Maker"
 APP = os.path.join(BUILD, f"{NAME}.app")
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 LAUNCHER = r"""#!/bin/bash
-# Starts the app: sets up the environment on first run, then runs the local
-# server and opens the browser. Quitting the app stops the server.
+# Starts the app: sets up the environment on first run, then opens the app's own
+# window with the engine running inside it. Quitting the window stops everything.
 set -u
 BUNDLE="$(cd "$(dirname "$0")/.." && pwd)"
 RES="$BUNDLE/Resources"
 SUPPORT="$HOME/Library/Application Support/Clavinova MIDI Maker"
 LOG_DIR="$HOME/Library/Logs"
 LOG="$LOG_DIR/Clavinova MIDI Maker.log"
-URL="http://127.0.0.1:8765"
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 export CLAVINOVA_WORK="$SUPPORT/work"
 export CLAVINOVA_STATE="$SUPPORT/state"
+# Python caches compiled code next to the source by default, which here means inside the app.
+# That added files to a signed app and broke its seal the first time it ran. Keep them out.
+export PYTHONPYCACHEPREFIX="$SUPPORT/pycache"
 mkdir -p "$SUPPORT" "$CLAVINOVA_WORK" "$CLAVINOVA_STATE" "$LOG_DIR"
 
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >>"$LOG"; }
 alert() { osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 with title \"Clavinova MIDI Maker\"" >/dev/null 2>&1; }
 
-# Already running? Just show it.
-if curl -fsS -m 2 "$URL/api/status" >/dev/null 2>&1; then
-  open "$URL"
-  exit 0
-fi
+# No "already running" shortcut here. One used to open the page in a web browser, which is
+# exactly what the app no longer does; desktop.py handles a second copy itself, in a window.
 
 VENV="$SUPPORT/venv"
 if [ ! -x "$VENV/bin/python" ]; then
@@ -82,6 +81,7 @@ SUPPORT="$HOME/Library/Application Support/Clavinova MIDI Maker"
 VENV="$SUPPORT/venv"
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 export UV_NO_CACHE=1
+export PYTHONPYCACHEPREFIX="$SUPPORT/pycache"          # never write compiled code inside the app
 
 say() { printf '\n==> %s\n' "$1"; }
 fail() { printf '\nSetup stopped: %s\n' "$1" >&2; exit 1; }

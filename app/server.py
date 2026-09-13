@@ -36,6 +36,7 @@ from pydantic import BaseModel  # noqa: E402
 
 import pipeline  # noqa: E402
 import sources  # noqa: E402
+import updater  # noqa: E402
 import usb  # noqa: E402
 
 ROOT = APP.parent
@@ -161,6 +162,7 @@ def status():
         "modes": pipeline.MODES,
         "melody_programs": {str(k): v for k, v in pipeline.MELODY_PROGRAMS.items()},
         "library": str(LIB),
+        "version": updater.current_version(),
     }
 
 
@@ -372,6 +374,27 @@ def library_reveal(name: str):
     return {"ok": True}
 
 
+@app.get("/api/update")
+def update_status():
+    return updater.UPDATER.snapshot()
+
+
+@app.post("/api/update/check")
+def update_check():
+    return updater.UPDATER.check(manual=True)
+
+
+@app.post("/api/update/install")
+def update_install():
+    if any(j.status in ("running", "queued") for j in JOBS.values()):
+        raise HTTPException(400, "Finish or cancel the song being made first, then update.")
+    try:
+        updater.UPDATER.start_install()
+    except updater.UpdateError as e:
+        raise HTTPException(400, str(e))
+    return updater.UPDATER.snapshot()
+
+
 @app.post("/api/open-library")
 def open_library():
     subprocess.run(["open", str(LIB)], timeout=10)
@@ -448,6 +471,7 @@ def main():
     clean_leftovers()
     threading.Thread(target=pipeline.check_models_in_child, daemon=True).start()
     threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=updater.startup, daemon=True).start()
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
 
 
