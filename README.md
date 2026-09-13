@@ -141,9 +141,20 @@ first time downloads the AI models, which takes about ten minutes and needs
 
 There is also a zip of the app on the
 [releases page](https://github.com/koderking25/clavinova-midi/releases/latest).
-It is not signed with an Apple developer account, so macOS will not open it on a
-double click: right click the app and choose **Open** the first time, then
-**Open** again in the warning. The one line install above avoids that.
+It is not signed with an Apple developer account (that needs Apple's paid
+programme), so macOS blocks a downloaded copy and says it "could not verify" the
+app. Open it once and let it be refused, then go to **System Settings** ->
+**Privacy & Security**, scroll down to the message about the app and click
+**Open Anyway**. Once only.
+
+On macOS 15 and newer, right clicking and choosing Open no longer works for this:
+Apple moved the decision into System Settings. The one line install above avoids
+the whole thing, because the app is built on your Mac rather than downloaded, so
+it never gets flagged. To clear the flag on a copy you already downloaded:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Clavinova MIDI Maker.app"
+```
 
 To rebuild the app after changing the code:
 

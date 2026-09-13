@@ -57,6 +57,9 @@ pycparser==3.0
 pycryptodomex==3.23.0
 pydantic==2.13.5
 pydantic-core==2.46.5
+pyobjc-core==12.2.2
+pyobjc-framework-cocoa==12.2.2
+pyobjc-framework-webkit==12.2.2
 python-multipart==0.0.32
 pyyaml==6.0.3
 requests==2.34.2

@@ -68,20 +68,10 @@ if [ ! -x "$VENV/bin/python" ]; then
   fi
 fi
 
-say "starting the app"
-"$VENV/bin/python" "$RES/app/server.py" >>"$LOG" 2>&1 &
-SERVER=$!
-trap 'kill $SERVER 2>/dev/null' EXIT INT TERM
-
-for _ in $(seq 1 90); do
-  curl -fsS -m 2 "$URL/api/status" >/dev/null 2>&1 && break
-  kill -0 $SERVER 2>/dev/null || { alert "The app could not start. See Console, or ~/Library/Logs/Clavinova MIDI Maker.log"; exit 1; }
-  sleep 1
-done
-# CLAVINOVA_NO_BROWSER is for testing the launcher without taking over the screen.
-[ -n "${CLAVINOVA_NO_BROWSER:-}" ] || open "$URL"
-say "ready at $URL"
-wait $SERVER
+say "opening the window"
+# desktop.py is the app itself: a real Mac window with the engine running inside it.
+# No browser, no tab. Quitting the window quits everything.
+exec "$VENV/bin/python" "$RES/app/desktop.py" >>"$LOG" 2>&1
 """
 
 SETUP = r"""#!/bin/bash

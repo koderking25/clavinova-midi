@@ -168,7 +168,7 @@ const MODE_NAMES = { arrange: "Piano version", piano: "Solo piano", band: "Full 
 const S = { mode: store.get("mode", "arrange"), split: store.get("split", true), melody: store.get("melody", 73),
             drives: [], drive: store.get("drive", null), jobs: [], seenDone: new Set(), highlight: null, status: {} };
 
-const LOST = "Lost connection to the app. This page reconnects by itself as soon as the app is running. If you closed its Terminal window, double-click Clavinova MIDI Maker to start it again.";
+const LOST = "Lost connection to the engine. It reconnects by itself. If this keeps happening, quit Clavinova MIDI Maker with Cmd+Q and open it again.";
 async function api(path, opts = {}) {
   const o = { ...opts, headers: { ...(opts.headers || {}) } };
   if (o.method && o.method !== "GET") o.headers["x-clavinova"] = "1";
