@@ -583,13 +583,13 @@ function renderUpdate(u) {
   const newer = u.latest && u.current && verNum(u.latest) > verNum(u.current);
   let msg = null;
   if (u.state === "available") {
-    msg = u.can_install ? `Version ${u.latest} is ready. It installs in a few seconds and the app reopens by itself.`
+    msg = u.can_install ? `Midify ${u.latest} is available. Click Update now: Midify closes, installs it and reopens, which takes a few seconds.`
                         : `Version ${u.latest} is available from the website.`;
     go.hidden = !u.can_install; go.textContent = "Update now";
   } else if (u.state === "downloading") {
-    msg = `Downloading version ${u.latest}... ${Math.round((u.progress || 0) * 100)}%`;
+    msg = `Downloading Midify ${u.latest}... ${Math.round((u.progress || 0) * 100)}%`;
   } else if (u.state === "installing") {
-    msg = `Installing version ${u.latest}. The app will close and reopen by itself.`;
+    msg = `Installing Midify ${u.latest}. Midify will close and reopen in a few seconds.`;
   } else if (u.state === "error" && u.error) {
     msg = u.error;
     if (newer && u.can_install) { go.hidden = false; go.textContent = "Try again"; }

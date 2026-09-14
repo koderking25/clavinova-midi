@@ -224,6 +224,60 @@ print("10. Leftovers from an interrupted update")
 U.tidy_leftovers(target=fake)
 check("tidied away while the app is intact", not list(apps.glob(".*")))
 
+print("11. What went wrong for a real user: a remembered check pointing at a file that is gone")
+import json as _json, socket as _socket
+U.CACHE.parent.mkdir(parents=True, exist_ok=True)
+U.CACHE.write_text(_json.dumps({"release": dict(release, url="file:///tmp/this-test-file-was-deleted/Midify.dmg"),
+                                "etag": None, "checked_at": time.time()}))
+before = calls["n"]
+u11 = U.Updater()
+s11 = u11.check()
+check("the remembered file address is ignored and GitHub is asked again", calls["n"] == before + 1, f"GitHub asked {calls['n'] - before} time(s)")
+check("the release it now knows comes from GitHub over HTTPS", bool(u11._release) and u11._release["url"].startswith("https://github.com/"),
+      str(u11._release and u11._release["url"][:60]))
+
+print("12. Addresses that are not GitHub are refused")
+expect_refusal("a download from anywhere else is refused", lambda: u.download(dict(release, url="https://example.com/Midify.dmg")), "did not come from GitHub")
+
+print("13. The message matches the real problem")
+expect_refusal("GitHub refusing the file does not blame the internet",
+               lambda: u.download(dict(release, url="https://github.com/koderking25/clavinova-midi/releases/download/v0.0.0/missing.dmg")),
+               "would not hand over")
+real = urllib.request.urlopen
+urllib.request.urlopen = lambda *a, **k: (_ for _ in ()).throw(urllib.error.URLError(_socket.gaierror(8, "nodename nor servname provided")))
+expect_refusal("a real connection failure does say to check the internet", lambda: u.download(release), "check the internet")
+urllib.request.urlopen = real
+
+print("14. A failed download asks GitHub again and retries once")
+make_old_copy()
+u14 = U.Updater()
+u14.check()
+real_download = U.Updater.download
+attempts = {"n": 0}
+def flaky(self, rel, on_progress=None):
+    attempts["n"] += 1
+    if attempts["n"] == 1:
+        raise U.DownloadFailed("first try fails", detail="simulated")
+    return real_download(self, rel, on_progress)
+U.Updater.download = flaky
+try:
+    staged = u14.prepare_with_retry(target=fake)
+    check("the second try succeeds and the update is staged", staged.exists() and version_of(staged) == latest, f"{attempts['n']} download attempts")
+    shutil.rmtree(staged, ignore_errors=True)
+except U.UpdateError as e:
+    check("the second try succeeds and the update is staged", False, str(e))
+finally:
+    U.Updater.download = real_download
+check("the app itself is untouched by staging", version_of(fake) == "1.2.9")
+
+print("15. A test release never touches the real app's memory of updates")
+probe = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import updater as u; print(u.CACHE.name, u.DOWNLOADS.name)",
+                        str(REPO / "app")], capture_output=True, text=True, env=dict(os.environ, CLAVINOVA_UPDATE_API="file:///x/release.json"))
+normal = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import updater as u; print(u.CACHE.name, u.DOWNLOADS.name)",
+                         str(REPO / "app")], capture_output=True, text=True, env={k: v for k, v in os.environ.items() if k != "CLAVINOVA_UPDATE_API"})
+check("with a test release it uses its own files", probe.stdout.split() == ["update-test.json", "updates-test"], probe.stdout.strip() or probe.stderr[-200:])
+check("a normal launch uses the real ones", normal.stdout.split() == ["update.json", "updates"], normal.stdout.strip())
+
 shutil.rmtree(WORK, ignore_errors=True)
 print(f"\n{sum(results)} of {len(results)} checks passed.")
 sys.exit(0 if all(results) else 1)

@@ -24,8 +24,10 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -35,7 +37,8 @@ LEGACY_ASSET = "Clavinova-MIDI-Maker.dmg"
 BUNDLE_ID = "com.koderking25.clavinova-midi-maker"
 # Only a test sets CLAVINOVA_UPDATE_API, to install a local build end to end. A normal launch
 # never has it, so the app only ever looks at this repository's real releases.
-API = os.environ.get("CLAVINOVA_UPDATE_API") or f"https://api.github.com/repos/{REPO}/releases/latest"
+TEST_API = os.environ.get("CLAVINOVA_UPDATE_API")
+API = TEST_API or f"https://api.github.com/repos/{REPO}/releases/latest"
 CHECK_EVERY = 6 * 3600
 MANUAL_GAP = 60
 BACKOFF = 3600
@@ -43,8 +46,10 @@ MAX_DOWNLOAD = 50 * 1024 * 1024
 
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("CLAVINOVA_STATE", HERE.parent / "state"))
-CACHE = STATE / "update.json"
-DOWNLOADS = STATE / "updates"
+# A test release never touches the app's own memory of updates or its downloads. It once did, and
+# left the real app remembering a test file that no longer existed, so every update "failed".
+CACHE = STATE / ("update-test.json" if TEST_API else "update.json")
+DOWNLOADS = STATE / ("updates-test" if TEST_API else "updates")
 LOG = Path.home() / "Library" / "Logs" / "Midify.log"
 
 SWAP_SCRIPT = r"""#!/bin/bash
@@ -78,6 +83,30 @@ exit 0
 
 class UpdateError(Exception):
     """A reason to show the user, in plain words."""
+
+
+class DownloadFailed(UpdateError):
+    """The update file could not be fetched. `network` says whether the connection was the problem,
+    so "check the internet" is only ever said when it is true. `detail` goes to the log."""
+
+    def __init__(self, message, network=False, detail=""):
+        super().__init__(message)
+        self.network, self.detail = network, detail
+
+
+def trusted_url(url):
+    """Updates only ever come from GitHub over HTTPS (a test release excepted)."""
+    if TEST_API:
+        return True
+    u = urllib.parse.urlparse(url or "")
+    host = (u.hostname or "").lower()
+    return u.scheme == "https" and (host == "github.com" or host.endswith(".githubusercontent.com"))
+
+
+def _is_network(exc):
+    reason = getattr(exc, "reason", exc)
+    return isinstance(reason, (socket.gaierror, socket.timeout, TimeoutError, ConnectionError)) or \
+        isinstance(exc, (socket.timeout, TimeoutError, ConnectionError))
 
 
 def parse_version(text):
@@ -168,6 +197,9 @@ class Updater:
             return self.snapshot()
         now = time.time()
         cache = self._load_cache()
+        cached = cache.get("release") or {}
+        if cached and not trusted_url(cached.get("url")):
+            cache = {k: v for k, v in cache.items() if k == "backoff_until"}   # never trust it: ask GitHub again
         if now < cache.get("backoff_until", 0):
             self._apply_release(cache.get("release"), cur, cache.get("checked_at"))
             if manual:
@@ -222,7 +254,7 @@ class Updater:
         assets = data.get("assets") or []
         # Midify's file first; the old name too, so a release from before the rename still counts.
         asset = next((a for name in (ASSET, LEGACY_ASSET) for a in assets if a.get("name") == name), None)
-        if not asset or not parse_version(data.get("tag_name")):
+        if not asset or not parse_version(data.get("tag_name")) or not trusted_url(asset.get("browser_download_url")):
             return None
         return {"tag": data["tag_name"], "url": asset.get("browser_download_url"), "size": asset.get("size"),
                 "digest": asset.get("digest"), "notes_url": data.get("html_url")}
@@ -250,9 +282,37 @@ class Updater:
             self.status.update(state="downloading", progress=0.0, error=None)
         threading.Thread(target=self._install, daemon=True).start()
 
+    def refresh_release(self):
+        """Ask GitHub again right now, ignoring what was remembered. Used when a download fails,
+        in case the remembered release is out of date."""
+        cache = self._load_cache()
+        cache.pop("etag", None)
+        cache["checked_at"] = 0
+        self._save_cache(cache)
+        self._last_manual = 0
+        state = self.status["state"]
+        self._set(state="idle")
+        self.check(manual=True)
+        fresh = self._release
+        self._set(state=state)
+        return fresh
+
+    def prepare_with_retry(self, on_progress=None, target=None):
+        """Download and stage. If the download fails, ask GitHub again and try once more, so a stale
+        or expired download address never ends the update."""
+        try:
+            return self.prepare(self._release, on_progress=on_progress, target=target)
+        except DownloadFailed as first:
+            _log(f"download failed ({first.detail or first}); asking GitHub again and retrying once")
+            fresh = self.refresh_release()
+            cur = parse_version(current_version())
+            if not fresh or not cur or not parse_version(fresh["tag"]) or parse_version(fresh["tag"]) <= cur:
+                raise first
+            return self.prepare(fresh, on_progress=on_progress, target=target)
+
     def _install(self):
         try:
-            staged = self.prepare(self._release, on_progress=lambda p: self._set(progress=round(p, 3)))
+            staged = self.prepare_with_retry(on_progress=lambda p: self._set(progress=round(p, 3)))
             self._set(state="installing", progress=1.0)
             self.hand_over(staged)
         except UpdateError as e:
@@ -323,6 +383,9 @@ class Updater:
         size, want = int(release["size"]), release["digest"].split(":", 1)[1].lower()
         if size > MAX_DOWNLOAD:
             raise UpdateError("The update is unexpectedly large, so it was not downloaded.")
+        if not trusted_url(release.get("url")):
+            raise DownloadFailed("The update did not come from GitHub, so it was not downloaded.",
+                                 detail=f"untrusted address {release.get('url')}")
         req = urllib.request.Request(release["url"], headers={"User-Agent": "Midify"})
         h, got = hashlib.sha256(), 0
         try:
@@ -341,9 +404,17 @@ class Updater:
         except UpdateError:
             part.unlink(missing_ok=True)
             raise
-        except Exception:  # noqa: BLE001
+        except urllib.error.HTTPError as e:
             part.unlink(missing_ok=True)
-            raise UpdateError("The download did not finish. Check the internet connection and try again.")
+            raise DownloadFailed("GitHub would not hand over the update file. Try again in a few minutes.",
+                                 detail=f"HTTP {e.code} for {release['url']}")
+        except Exception as e:  # noqa: BLE001
+            part.unlink(missing_ok=True)
+            if _is_network(e):
+                raise DownloadFailed("Could not reach GitHub to download the update. Check the internet "
+                                     "connection and try again.", network=True, detail=f"{type(e).__name__}: {e}")
+            raise DownloadFailed("The update could not be downloaded. Try again in a few minutes.",
+                                 detail=f"{type(e).__name__}: {e} for {release['url']}")
         if got != size or h.hexdigest() != want:
             part.unlink(missing_ok=True)
             raise UpdateError("The download did not match GitHub's fingerprint for it, so it was thrown away. "

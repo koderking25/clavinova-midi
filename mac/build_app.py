@@ -24,7 +24,7 @@ NAME = "Midify"
 # renaming it would force every existing install through the ten minute setup again.
 SUPPORT_NAME = "Clavinova MIDI Maker"
 APP = os.path.join(BUILD, f"{NAME}.app")
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 
 LAUNCHER = r"""#!/bin/bash
 # Starts the app: sets up the environment on first run, then opens the app's own
