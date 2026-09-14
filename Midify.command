@@ -6,7 +6,7 @@ PORT=8765
 URL="http://127.0.0.1:$PORT"
 
 if curl -s -m 2 "$URL/api/status" >/dev/null 2>&1; then
-  echo "Clavinova MIDI Maker is already running. Opening it..."
+  echo "Midify is already running. Opening it..."
   open "$URL"
   exit 0
 fi
@@ -19,7 +19,7 @@ if [ ! -x .venv/bin/python ]; then
   fi
 fi
 
-echo "Starting Clavinova MIDI Maker..."
+echo "Starting Midify..."
 echo "Keep this window open while you use it. Close it to stop the app."
 (
   for _ in $(seq 1 90); do

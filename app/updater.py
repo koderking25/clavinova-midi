@@ -30,7 +30,8 @@ import urllib.request
 from pathlib import Path
 
 REPO = "koderking25/clavinova-midi"
-ASSET = "Clavinova-MIDI-Maker.dmg"
+ASSET = "Midify.dmg"                 # releases also carry the old name, for apps from before the rename
+LEGACY_ASSET = "Clavinova-MIDI-Maker.dmg"
 BUNDLE_ID = "com.koderking25.clavinova-midi-maker"
 # Only a test sets CLAVINOVA_UPDATE_API, to install a local build end to end. A normal launch
 # never has it, so the app only ever looks at this repository's real releases.
@@ -44,7 +45,7 @@ HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("CLAVINOVA_STATE", HERE.parent / "state"))
 CACHE = STATE / "update.json"
 DOWNLOADS = STATE / "updates"
-LOG = Path.home() / "Library" / "Logs" / "Clavinova MIDI Maker.log"
+LOG = Path.home() / "Library" / "Logs" / "Midify.log"
 
 SWAP_SCRIPT = r"""#!/bin/bash
 PID="$1"; CURRENT="$2"; STAGED="$3"; BACKUP="$4"; LOG="$5"; RELAUNCH="$6"
@@ -183,7 +184,7 @@ class Updater:
             return self.snapshot()
 
         self._set(state="checking", error=None)
-        headers = {"Accept": "application/vnd.github+json", "User-Agent": f"ClavinovaMIDIMaker/{cur}"}
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": f"Midify/{cur}"}
         if cache.get("etag") and cache.get("release"):
             headers["If-None-Match"] = cache["etag"]
         try:
@@ -218,7 +219,9 @@ class Updater:
     def _pick(data):
         if data.get("draft") or data.get("prerelease"):
             return None
-        asset = next((a for a in data.get("assets") or [] if a.get("name") == ASSET), None)
+        assets = data.get("assets") or []
+        # Midify's file first; the old name too, so a release from before the rename still counts.
+        asset = next((a for name in (ASSET, LEGACY_ASSET) for a in assets if a.get("name") == name), None)
         if not asset or not parse_version(data.get("tag_name")):
             return None
         return {"tag": data["tag_name"], "url": asset.get("browser_download_url"), "size": asset.get("size"),
@@ -276,7 +279,7 @@ class Updater:
             raise UpdateError("Your Mac is too full to install the update. Free up some space and try again.")
 
         dmg = self.download(release, on_progress)
-        mount = tempfile.mkdtemp(prefix="clavinova-update-")
+        mount = tempfile.mkdtemp(prefix="midify-update-")
         attached = False
         try:
             r = subprocess.run(["hdiutil", "attach", str(dmg), "-readonly", "-nobrowse", "-noautoopen",
@@ -320,7 +323,7 @@ class Updater:
         size, want = int(release["size"]), release["digest"].split(":", 1)[1].lower()
         if size > MAX_DOWNLOAD:
             raise UpdateError("The update is unexpectedly large, so it was not downloaded.")
-        req = urllib.request.Request(release["url"], headers={"User-Agent": "ClavinovaMIDIMaker"})
+        req = urllib.request.Request(release["url"], headers={"User-Agent": "Midify"})
         h, got = hashlib.sha256(), 0
         try:
             with urllib.request.urlopen(req, timeout=30) as r, open(part, "wb") as f:

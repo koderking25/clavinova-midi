@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-time setup for Clavinova MIDI Maker on a Mac with Apple Silicon (M1 or newer).
+# One-time setup for Midify on a Mac with Apple Silicon (M1 or newer).
 # Safe to run again: it skips anything already installed.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -53,5 +53,5 @@ if [ "${SKIP_SELFTEST:-0}" != "1" ]; then
   .venv/bin/python tests/selftest.py 2>/dev/null || fail "the self-test found a problem. The lines above say which check failed."
 fi
 
-chmod +x "Clavinova MIDI Maker.command"
-say "Done. Double-click 'Clavinova MIDI Maker.command' to start the app."
+chmod +x "Midify.command"
+say "Done. Double-click 'Midify.command' to start the app."

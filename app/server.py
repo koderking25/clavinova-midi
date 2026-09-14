@@ -1,4 +1,4 @@
-"""Clavinova MIDI Maker: a local web app at http://127.0.0.1:8765
+"""Midify: the engine behind the Mac app, a local web app at http://127.0.0.1:8765
 
 Only this Mac can reach it. One song is converted at a time (8 GB of memory
 fits one comfortably); the rest wait in line.
@@ -45,7 +45,47 @@ ROOT = APP.parent
 WORK = Path(os.environ.get("CLAVINOVA_WORK", ROOT / "work"))
 UPLOADS = WORK / "uploads"
 STATE = Path(os.environ.get("CLAVINOVA_STATE", ROOT / "state"))
-LIB = Path(os.environ.get("CLAVINOVA_LIBRARY", Path.home() / "Music" / "Clavinova MIDI"))
+LIB = Path(os.environ.get("CLAVINOVA_LIBRARY", Path.home() / "Music" / "Midify"))
+# The app used to be called Clavinova MIDI Maker. Move its songs folder over once, keeping every song
+# and its details. Only when nothing is in the way, so nothing can be overwritten.
+_OLD_LIB = Path.home() / "Music" / "Clavinova MIDI"
+
+
+def migrate_library(old=_OLD_LIB, new=LIB):
+    """Move songs from the old folder into the new one. Renames it when the new one does not exist
+    yet; otherwise merges, moving only what the new folder does not already have, so an older app
+    that kept saving into the old folder never strands a song. Never overwrites anything."""
+    if not old.is_dir():
+        return
+    if not new.exists():
+        try:
+            old.rename(new)
+        except OSError:
+            pass
+        return
+    for src_dir, dst_dir in ((old / ".clavinova", new / ".clavinova"), (old, new)):
+        if not src_dir.is_dir():
+            continue
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        for item in src_dir.iterdir():
+            if item.name == ".clavinova":
+                continue
+            target = dst_dir / item.name
+            if not target.exists():
+                try:
+                    item.rename(target)
+                except OSError:
+                    pass
+    for leftover in (old / ".clavinova", old):
+        try:
+            (leftover / ".DS_Store").unlink(missing_ok=True)
+            leftover.rmdir()                            # only if now empty
+        except OSError:
+            pass
+
+
+if "CLAVINOVA_LIBRARY" not in os.environ:
+    migrate_library()
 META = LIB / ".clavinova"
 PORT = int(os.environ.get("CLAVINOVA_PORT", "8765"))
 MAX_UPLOAD = 400 * 1024 * 1024
@@ -55,14 +95,30 @@ for _d in (WORK, UPLOADS, STATE, LIB, META):
     _d.mkdir(parents=True, exist_ok=True)
 
 
+QUEUE_FILE = STATE / "queue.json"
+SAVED_FIELDS = ("id", "title", "mode", "source", "video_id", "upload_path", "duration_hint", "melody_program",
+                "split_hands", "created", "status", "result", "send_to_drive", "drive_path", "drive_folder",
+                "drive_status", "drive_file")
+
+
+def _saved_queue():
+    try:
+        return json.loads(QUEUE_FILE.read_text())
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def clean_leftovers():
     """Remove what a crash or force-quit left behind. Called only at start-up, never on import:
-    each song's process imports this file too, and must not delete the upload it is about to read."""
+    each song's process imports this file too, and must not delete the upload it is about to read.
+    Recordings still waiting in the saved queue are kept, so an unfinished batch can carry on."""
+    keep = {str(Path(j["upload_path"]).resolve()) for j in _saved_queue() if j.get("upload_path")}
     for d in WORK.iterdir():
         if d.is_dir() and d.name != "uploads":
             shutil.rmtree(d, ignore_errors=True)
     for f in UPLOADS.iterdir():
-        f.unlink(missing_ok=True)
+        if str(f.resolve()) not in keep:
+            f.unlink(missing_ok=True)
     for f in META.glob("*.partial"):
         f.unlink(missing_ok=True)
 
@@ -71,6 +127,118 @@ JOBS = {}
 ORDER = []
 Q = queue.Queue()
 LOCK = threading.Lock()
+SEND_LOCK = threading.Lock()
+
+
+def save_queue():
+    """Songs not yet made, and made songs still waiting for the flash drive, survive quitting the app."""
+    with LOCK:
+        keep = [JOBS[i] for i in ORDER if i in JOBS and
+                (JOBS[i].status in ("queued", "running") or JOBS[i].drive_status == "waiting")]
+        data = [{k: getattr(j, k) for k in SAVED_FIELDS} for j in keep]
+    try:
+        STATE.mkdir(parents=True, exist_ok=True)
+        tmp = QUEUE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data))
+        os.replace(tmp, QUEUE_FILE)
+    except OSError:
+        pass
+
+
+def restore_queue():
+    """Put back what was saved when the app last closed. A song that was being made starts again."""
+    restored = 0
+    for fields in _saved_queue():
+        try:
+            job = pipeline.Job(**{k: v for k, v in fields.items() if k in SAVED_FIELDS})
+        except TypeError:
+            continue
+        if job.source == "upload" and job.status != "done" and not (job.upload_path and Path(job.upload_path).exists()):
+            continue
+        if job.status in ("queued", "running"):
+            job.status, job.stage, job.progress = "queued", "Waiting (carried on from last time)", 0.0
+            with LOCK:
+                JOBS[job.id] = job
+                ORDER.append(job.id)
+            Q.put(job)
+            restored += 1
+        elif job.drive_status == "waiting" and job.result:
+            with LOCK:
+                JOBS[job.id] = job
+                ORDER.append(job.id)
+            restored += 1
+    return restored
+
+
+def _next_number(folder):
+    best = 0
+    try:
+        for f in Path(folder).glob("*.mid"):
+            m = re.match(r"(\d{1,3}) ", f.name)
+            if m:
+                best = max(best, int(m.group(1)))
+    except OSError:
+        pass
+    return best + 1
+
+
+def try_send(job):
+    """Copy a finished song to the flash drive. False means no usable drive yet (try again later)."""
+    usable = [d for d in usb.list_drives() if d["writable"]]
+    drive = next((d for d in usable if d["path"] == job.drive_path), None)
+    if drive is None and len(usable) == 1:
+        drive = usable[0]
+    if drive is None:
+        job.drive_status = "waiting"
+        return False
+    src = LIB / (job.result or {}).get("file", "")
+    if not job.result or not src.is_file():
+        job.drive_status = "The song was removed before it could be copied to the flash drive."
+        return True
+    folder_name = usb.safe_filename(job.drive_folder, ext="") if job.drive_folder else ""
+    folder = Path(drive["path"]) / folder_name if folder_name else Path(drive["path"])
+    title = job.result.get("title") or src.stem
+    try:
+        r = usb.copy_to_drive(src, drive["path"], filename=f"{_next_number(folder):02d} {title}.mid",
+                              subfolder=job.drive_folder or "")
+    except (ValueError, OSError) as e:
+        if "not connected" in str(e):
+            job.drive_status = "waiting"
+            return False
+        job.drive_status = str(e)
+        return True
+    job.drive_status = "sent"
+    job.drive_file = f"{folder_name}/{r['name']}" if folder_name else r["name"]
+    return True
+
+
+def drive_sender():
+    """Every few seconds, copy finished songs that are waiting for the flash drive, in order."""
+    while True:
+        time.sleep(4)
+        with LOCK:
+            waiting = [JOBS[i] for i in ORDER if i in JOBS and JOBS[i].drive_status == "waiting"]
+        if not waiting:
+            continue
+        changed = False
+        with SEND_LOCK:
+            for job in waiting:
+                if not try_send(job):
+                    break                                # no drive yet: keep the order, try later
+                changed = True
+        if changed:
+            save_queue()
+
+
+def start_background():
+    """Everything the engine runs besides the web server. Shared by the app window and server.py."""
+    import updater
+    clean_leftovers()
+    restore_queue()
+    threading.Thread(target=pipeline.check_models_in_child, daemon=True).start()
+    threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=drive_sender, daemon=True).start()
+    threading.Thread(target=updater.startup, daemon=True).start()
 
 
 @app.middleware("http")
@@ -101,11 +269,16 @@ def worker():
             job.status, job.stage = "cancelled", "Cancelled"
             continue
         job.status = "running"
+        save_queue()
         try:
             job.stage = "Getting ready"
             pipeline.MODELS_CHECKED.wait(timeout=900)     # never run alongside the start-up model check
             job.result = pipeline.run_in_child(job, WORK, LIB)
             job.status, job.stage, job.progress, job.eta = "done", "Done", 1.0, 0
+            prune_previews()
+            if job.send_to_drive:
+                with SEND_LOCK:
+                    try_send(job)
         except pipeline.Cancelled:
             job.status, job.stage = "cancelled", "Cancelled"
         except pipeline.UserError as e:
@@ -121,6 +294,7 @@ def worker():
         finally:
             if job.upload_path:
                 Path(job.upload_path).unlink(missing_ok=True)
+            save_queue()
 
 
 def add_job(job):
@@ -128,10 +302,13 @@ def add_job(job):
         JOBS[job.id] = job
         ORDER.append(job.id)
         while len(ORDER) > 50:
-            old = ORDER.pop(0)
-            if JOBS.get(old) and JOBS[old].status in ("done", "error", "cancelled"):
-                JOBS.pop(old, None)
+            old = ORDER[0]
+            if JOBS.get(old) and (JOBS[old].status in ("queued", "running") or JOBS[old].drive_status == "waiting"):
+                break                                    # never forget work that is still to do
+            ORDER.pop(0)
+            JOBS.pop(old, None)
     Q.put(job)
+    save_queue()
     return job.public()
 
 
@@ -203,6 +380,14 @@ class YTJob(BaseModel):
     mode: str = "arrange"
     melody_program: int = 73
     split_hands: bool = True
+    send_to_drive: bool = False
+    drive_path: str | None = None
+    drive_folder: str | None = None
+
+
+def _clean_folder(name):
+    name = (name or "").strip()
+    return usb.safe_filename(name, ext="") if name else None
 
 
 def _check_options(mode, melody_program):
@@ -221,7 +406,8 @@ def create_job(req: YTJob):
         raise HTTPException(400, "That video is longer than 15 minutes. Pick a shorter one.")
     job = pipeline.Job(title=req.title.strip()[:150] or "Song", mode=req.mode, source="youtube",
                        video_id=req.video_id, duration_hint=req.duration,
-                       melody_program=req.melody_program, split_hands=req.split_hands)
+                       melody_program=req.melody_program, split_hands=req.split_hands,
+                       send_to_drive=req.send_to_drive, drive_path=req.drive_path, drive_folder=_clean_folder(req.drive_folder))
     return add_job(job)
 
 
@@ -236,7 +422,8 @@ def _probe_seconds(path):
 
 @app.post("/api/upload")
 async def upload(file: UploadFile = File(...), mode: str = Form("arrange"), melody_program: int = Form(73),
-                 split_hands: bool = Form(True)):
+                 split_hands: bool = Form(True), send_to_drive: bool = Form(False), drive_path: str = Form(""),
+                 drive_folder: str = Form("")):
     _check_options(mode, melody_program)
     name = Path(file.filename or "song").name
     stem, ext = Path(name).stem, Path(name).suffix.lower()
@@ -251,7 +438,7 @@ async def upload(file: UploadFile = File(...), mode: str = Form("arrange"), melo
             notes = sum(1 for t in m.tracks for msg in t if msg.type == "note_on" and msg.velocity > 0)
         except Exception:  # noqa: BLE001
             tmp.unlink(missing_ok=True)
-            raise HTTPException(400, "That .mid file is damaged and would not play on the Clavinova.")
+            raise HTTPException(400, "That .mid file is damaged and would not play on your piano.")
         if notes == 0:
             tmp.unlink(missing_ok=True)
             raise HTTPException(400, "That MIDI file has no notes in it.")
@@ -279,7 +466,8 @@ async def upload(file: UploadFile = File(...), mode: str = Form("arrange"), melo
         dest.unlink(missing_ok=True)
         raise HTTPException(400, "That file is empty.")
     job = pipeline.Job(title=stem[:150] or "Song", mode=mode, source="upload", upload_path=str(dest),
-                       duration_hint=_probe_seconds(dest), melody_program=melody_program, split_hands=split_hands)
+                       duration_hint=_probe_seconds(dest), melody_program=melody_program, split_hands=split_hands,
+                       send_to_drive=send_to_drive, drive_path=drive_path or None, drive_folder=_clean_folder(drive_folder))
     return add_job(job)
 
 
@@ -349,7 +537,8 @@ def library():
         items.append({"file": p.name, "size": p.stat().st_size, "modified": p.stat().st_mtime,
                       "title": meta.get("title") or p.stem, "mode": meta.get("mode"), "bpm": meta.get("bpm"),
                       "seconds": meta.get("seconds"), "parts": meta.get("parts") or [],
-                      "preview": (META / (p.stem + ".mp3")).exists()})
+                      "preview": True,                  # made on demand if it is not there yet
+                      "auto": bool(meta.get("auto")), "score_grid": meta.get("score_grid")})
     return items
 
 
@@ -359,12 +548,33 @@ def library_midi(name: str):
     return FileResponse(p, media_type="audio/midi", filename=p.name)
 
 
+PREVIEW_LOCK = threading.Lock()
+
+
+def prune_previews(keep=None):
+    """Keep only the most recently made previews. Any song's preview is remade when Preview is pressed."""
+    keep = pipeline.PREVIEWS_KEPT if keep is None else keep
+    previews = sorted(META.glob("*.mp3"), key=lambda f: f.stat().st_mtime, reverse=True)
+    for old in previews[keep:]:
+        old.unlink(missing_ok=True)
+
+
 @app.get("/api/library/{name}/preview")
 def library_preview(name: str):
     p = _lib_file(name)
     mp3 = META / (p.stem + ".mp3")
     if not mp3.exists():
-        raise HTTPException(404, "No preview for this song.")
+        with PREVIEW_LOCK:                              # one at a time; a second request just waits for it
+            if not mp3.exists():
+                tmpdir = WORK / f"preview-{p.stem}-{time.time_ns()}"
+                tmpdir.mkdir(parents=True, exist_ok=True)
+                try:
+                    made = pipeline.render_preview(p, mp3, tmpdir)
+                finally:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                if not made:
+                    raise HTTPException(500, "The preview could not be made.")
+                prune_previews()
     return FileResponse(mp3, media_type="audio/mpeg")
 
 
@@ -468,10 +678,7 @@ def update_downloader():
 
 
 def main():
-    clean_leftovers()
-    threading.Thread(target=pipeline.check_models_in_child, daemon=True).start()
-    threading.Thread(target=worker, daemon=True).start()
-    threading.Thread(target=updater.startup, daemon=True).start()
+    start_background()
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
 
 

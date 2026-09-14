@@ -1,4 +1,4 @@
-"""The conversion pipeline: a recording in, a Clavinova-ready MIDI file out.
+"""The conversion pipeline: a recording in, a MIDI file for your piano out.
 
 Modes
   piano    Solo piano recording. transkun on the whole recording.
@@ -37,6 +37,7 @@ APPLE_GM = "/System/Library/Components/CoreAudio.component/Contents/Resources/gs
 FALLBACK_SF = "/opt/homebrew/share/fluid-synth/sf2/VintageDreamsWaves-v2.sf2"
 
 MODES = {
+    "auto": "Automatic (picks solo piano or piano version)",
     "arrange": "Piano version of any song",
     "piano": "Solo piano recording",
     "band": "Full band (separate instruments)",
@@ -81,10 +82,17 @@ class Job:
     result: dict = None
     cancelled: bool = False
     created: float = field(default_factory=time.time)
+    # Batch to flash drive: copied there when done, numbered in the order songs were added.
+    send_to_drive: bool = False
+    drive_path: str = None
+    drive_folder: str = None
+    drive_status: str = None              # None, "waiting", "sent", or why it could not be copied
+    drive_file: str = None
 
     def public(self):
         return {k: getattr(self, k) for k in ("id", "title", "mode", "source", "status", "stage", "progress",
-                                               "eta", "error", "result", "created", "melody_program", "split_hands")}
+                                               "eta", "error", "result", "created", "melody_program", "split_hands",
+                                               "send_to_drive", "drive_folder", "drive_status", "drive_file")}
 
 
 class Models:
@@ -151,7 +159,7 @@ MODELS_CHECKED = threading.Event()
 # app down, and Cancel can stop a song at once.
 
 JOB_FIELDS = ("id", "title", "mode", "source", "video_id", "upload_path", "duration_hint",
-              "melody_program", "split_hands")
+              "melody_program", "split_hands", "send_to_drive")
 CANCEL_GRACE_S = 3
 
 
@@ -426,7 +434,7 @@ def refine_tempo(y, sr, bpm0, margin=0.08):
 
 
 def detect_tempo(x):
-    """Tempo only sets the BPM the Clavinova shows (and its bar lines); note timing is exact either way."""
+    """Tempo only sets the BPM the piano shows (and its bar lines); note timing is exact either way."""
     import librosa
     try:
         y = librosa.resample(x.mean(axis=1), orig_sr=SR, target_sr=22050)
@@ -447,6 +455,224 @@ def detect_tempo(x):
     except Exception:  # noqa: BLE001
         pass
     return round(bpm, 1)
+
+
+BEAT_TIGHTNESS = 100          # how strongly the beat tracker holds a steady tempo; lower follows rubato more
+
+
+def detect_beats(x, bpm, tightness=BEAT_TIGHTNESS):
+    """The times the beat falls, following the performance. None when they are not trustworthy,
+    in which case the song keeps a single fixed tempo exactly as before."""
+    import librosa
+    try:
+        y = librosa.resample(x.mean(axis=1), orig_sr=SR, target_sr=22050)
+        hop = 512
+        env = librosa.onset.onset_strength(y=y, sr=22050, hop_length=hop)
+        _, frames = librosa.beat.beat_track(onset_envelope=env, sr=22050, hop_length=hop,
+                                            start_bpm=float(bpm), tightness=float(tightness), trim=False)
+        beats = librosa.frames_to_time(frames, sr=22050, hop_length=hop)
+    except Exception:  # noqa: BLE001
+        return None
+    return beats if usable_beats(beats, len(x) / SR) else None
+
+
+def usable_beats(beats, seconds):
+    """A grid is only worth writing if it is steady enough to read and covers the song."""
+    b = np.asarray(beats, dtype=float)
+    if len(b) < 16:
+        return False
+    d = np.diff(b)
+    if np.any(d < 0.2) or np.any(d > 2.0):
+        return False
+    jumps = np.abs(np.log(d[1:] / d[:-1])) > np.log(1.35)       # one beat 35% longer or shorter than the last
+    if jumps.mean() > 0.10:
+        return False
+    return (b[-1] - b[0]) >= 0.6 * seconds
+
+
+def beat_accents(beats, notes):
+    """How heavy each beat is: notes starting on it, with bass notes and loud notes counting extra.
+    Bars tend to begin on the heaviest beat."""
+    b = np.asarray(beats, dtype=float)
+    starts = np.array([n.start for n in notes])
+    pitch = np.array([n.pitch for n in notes])
+    vel = np.array([n.velocity for n in notes], dtype=float)
+    acc = np.zeros(len(b))
+    for j, t in enumerate(b):
+        width = 0.07 if j + 1 >= len(b) else min(0.07, 0.3 * (b[j + 1] - t))
+        near = np.abs(starts - t) < width
+        if near.any():
+            acc[j] = near.sum() + 2.0 * (pitch[near] <= 52).sum() + vel[near].sum() / 100.0
+    return acc
+
+
+BASS_TOP = 52                  # MIDI note: at or below this counts as a bass note (E3)
+
+
+def _bass_onsets(notes, with_weight=False):
+    """Times bass notes start, with notes struck together counted once (keeping the loudest)."""
+    hits = sorted((n.start, n.velocity) for n in notes if n.pitch <= BASS_TOP)
+    t, w = [], []
+    for s, v in hits:
+        if t and s - t[-1] <= 0.1:
+            w[-1] = max(w[-1], v)
+        else:
+            t.append(s)
+            w.append(v)
+    return (np.array(t), np.array(w, dtype=float)) if with_weight else np.array(t)
+
+
+def _beat_position(b, t):
+    """Where time t falls, counted in beats (fractional)."""
+    i = np.clip(np.searchsorted(b, t) - 1, 0, len(b) - 2)
+    return i + (t - b[i]) / (b[i + 1] - b[i])
+
+
+def _bass_period(b, notes):
+    """How many beats usually pass between bass notes (0 if there is no clear bass)."""
+    onsets = _bass_onsets(notes)
+    onsets = onsets[(onsets > b[0]) & (onsets < b[-1])]
+    if len(onsets) < 8:
+        return 0.0
+    return float(np.median(np.diff(_beat_position(b, onsets))))
+
+
+def choose_meter(beats, notes):
+    """Returns (beats, beats_per_bar, downbeat).
+
+    Three classic mistakes are caught with the bass, the steadiest clue to where bars fall:
+    - the beat finder locked onto the off-beats: bass notes land between the beats, so shift half a beat;
+    - it counted eighth notes (84 BPM read as 168): the bass comes every 6 or 8 beats, so drop every other;
+    - a waltz: the bass comes every 3 beats, so bars are 3 beats long.
+    """
+    b = np.asarray(beats, dtype=float)
+    if not notes or len(b) < 8:
+        return b, 4, 0
+    onsets, weight = _bass_onsets(notes, with_weight=True)
+    keep = (onsets > b[0]) & (onsets < b[-1])
+    onsets, weight = onsets[keep], weight[keep]
+    if len(onsets) >= 8:
+        frac = _beat_position(b, onsets) % 1.0
+        on_beat = weight[(frac < 0.2) | (frac > 0.8)].sum()           # how hard, not just how many
+        mid_beat = weight[np.abs(frac - 0.5) < 0.2].sum()
+        if mid_beat > OFFBEAT_SHIFT * max(on_beat, 1e-9):
+            b = (b[:-1] + b[1:]) / 2.0
+    period = _bass_period(b, notes)
+    if (abs(period - 8) <= 0.6 or abs(period - 6) <= 0.6) and np.median(np.diff(b)) * 2 <= 1.5:
+        pos = _beat_position(b, onsets)
+        even = weight[np.round(pos) % 2 == 0].sum() >= weight[np.round(pos) % 2 == 1].sum() if len(pos) else True
+        b = b[0::2] if even else b[1::2]
+        period = _bass_period(b, notes)
+    per_bar = 3 if abs(period - 3) <= 0.4 else 4
+    if len(onsets) >= 8:                                                # bars start where the bass is heaviest
+        pos = np.round(_beat_position(b, onsets)).astype(int) % per_bar
+        downbeat = int(np.argmax([weight[pos == k].sum() for k in range(per_bar)]))
+    else:
+        acc = beat_accents(b, notes)
+        downbeat = int(np.argmax([acc[k::per_bar].mean() for k in range(per_bar)]))
+    return b, per_bar, downbeat
+
+
+OFFBEAT_SHIFT = 1.1
+
+
+def bass_consistency(grid, notes):
+    """In a grid that follows the music, the bass falls at the same few places in every bar.
+    Share of bass notes at the two most common places (to the nearest 16th). None: too little bass to tell."""
+    onsets = _bass_onsets(notes)
+    if len(onsets) < 8:
+        return None
+    bar = grid.per_bar * mx.PPQ
+    places = np.round(np.array([grid.tick(t) % bar for t in onsets]) / (mx.PPQ / 4)).astype(int) % (grid.per_bar * 4)
+    counts = np.sort(np.bincount(places, minlength=grid.per_bar * 4))[::-1]
+    return float(counts[:2].sum() / len(onsets))
+
+
+BASS_MIN_CONSISTENCY = 0.70
+
+
+def grid_fit(grid, notes):
+    """Share of note starts within a 64th note of a 16th-note position in the written file.
+    Random placement scores about 0.5; a grid that follows the music scores near 1."""
+    if not notes:
+        return 0.0
+    q = mx.PPQ / 4
+    ticks = np.array([grid.tick(n.start) for n in notes], dtype=float)
+    return float(np.mean(np.abs(((ticks + q / 2) % q) - q / 2) <= q / 4))
+
+
+GRID_MIN_FIT = 0.95
+
+
+def align_beats(beats, notes):
+    """Move the whole grid onto the notes. The beat finder measures onsets with a small, steady lag
+    (tens of milliseconds), which would write every note just off its beat."""
+    b = np.asarray(beats, dtype=float)
+    starts = np.array([n.start for n in notes if b[0] <= n.start <= b[-1]])
+    if len(starts) < 16:
+        return b
+    i = np.clip(np.searchsorted(b, starts), 1, len(b) - 1)
+    nearest = np.where(starts - b[i - 1] < b[i] - starts, b[i - 1], b[i])
+    local = np.diff(b).mean()
+    resid = starts - nearest
+    resid = resid[np.abs(resid) < 0.15 * local]
+    return b + float(np.median(resid)) if len(resid) >= 16 else b
+
+
+def plan_score_grid(x, notes, bpm):
+    """(beats, beats_per_bar, downbeat) for a readable score, or None to keep today's fixed tempo.
+    The grid is only used when the song's own notes line up with it."""
+    beats = detect_beats(x, bpm)
+    if beats is None or not notes:
+        return None
+    b, per_bar, downbeat = choose_meter(align_beats(beats, notes), notes)
+    b = align_beats(b, notes)
+    if not usable_beats(b, len(x) / SR):
+        return None
+    grid = mx.TimeGrid(bpm, b, downbeat, per_bar)
+    if grid_fit(grid, notes) < GRID_MIN_FIT:
+        return None
+    consistency = bass_consistency(grid, notes)
+    if consistency is not None and consistency < BASS_MIN_CONSISTENCY:
+        return None                                   # the grid drifts against the bars: keep the fixed tempo
+    return b, per_bar, downbeat
+
+
+AUTO_EXCERPT_S = 8               # three excerpts this long are separated to decide the mode
+
+
+class _Quiet:
+    """Stands in for a progress bar and a job while the mode is being decided."""
+    cancelled = False
+
+    def set(self, _):
+        pass
+
+
+def stem_shares(x):
+    """Share of the sound in each separated part (vocals, drums, bass, other), from three short
+    excerpts of the song. A solo piano recording is nearly all "other"."""
+    n, length = len(x), int(AUTO_EXCERPT_S * SR)
+    if n <= 3 * length:
+        clip = x
+    else:
+        clip = np.concatenate([x[int(n * f) - length // 2:int(n * f) + length // 2] for f in (0.25, 0.5, 0.75)])
+    stems = separate(np.ascontiguousarray(clip), _Quiet(), _Quiet())
+    energy = {k: float(np.mean(np.square(v, dtype=np.float64))) for k, v in stems.items()}
+    total = sum(energy.values()) or 1.0
+    return {k: e / total for k, e in energy.items()}
+
+
+AUTO_MAX_VOCALS = 0.03
+AUTO_MAX_DRUMS = 0.03
+AUTO_MAX_BASS = 0.05
+
+
+def decide_mode(shares):
+    """"piano" for a solo piano recording, otherwise "arrange" (the piano version of any song)."""
+    solo = (shares.get("vocals", 1) < AUTO_MAX_VOCALS and shares.get("drums", 1) < AUTO_MAX_DRUMS
+            and shares.get("bass", 1) < AUTO_MAX_BASS)
+    return "piano" if solo else "arrange"
 
 
 def run_transkun(x):
@@ -509,17 +735,23 @@ def separate(x, prog, job):
     return {name: np.ascontiguousarray(out[i].numpy().T) for i, name in enumerate(model.sources)}
 
 
+PREVIEW_RATE = 22050
+PREVIEWS_KEPT = 30                 # older previews are deleted and remade when Preview is pressed
+
+
 def render_preview(midi_path, mp3_path, workdir):
     """Play the MIDI through the Mac's own General MIDI sounds so it can be heard in the browser."""
     bank = APPLE_GM if Path(APPLE_GM).exists() else FALLBACK_SF
     wav = Path(workdir) / "preview.wav"
     try:
-        subprocess.run([FLUIDSYNTH, "-ni", "-q", "-g", "0.7", "-r", str(SR), "-F", str(wav), bank, str(midi_path)],
+        # Mono at 22 kHz and 64 kbps: a quarter of the old size for a preview through the Mac's own
+        # rough piano sounds, where the extra quality was never audible anyway.
+        subprocess.run([FLUIDSYNTH, "-ni", "-q", "-g", "0.7", "-r", str(PREVIEW_RATE), "-F", str(wav), bank, str(midi_path)],
                        capture_output=True, timeout=600, stdin=subprocess.DEVNULL)
         if not wav.exists() or wav.stat().st_size < 10000:
             return False
         subprocess.run([FFMPEG, "-nostdin", "-loglevel", "error", "-y", "-i", str(wav), "-af", "loudnorm=I=-16:TP=-1.5",
-                        "-b:a", "128k", str(mp3_path)], capture_output=True, timeout=600)
+                        "-ac", "1", "-b:a", "64k", str(mp3_path)], capture_output=True, timeout=600)
         return Path(mp3_path).exists() and Path(mp3_path).stat().st_size > 1000
     except Exception:  # noqa: BLE001
         return False
@@ -538,11 +770,15 @@ def plan_stages(job, seconds):
     if job.source == "youtube":
         s.append(("download", "Downloading the song", 8 + seconds * 0.02))
     s.append(("decode", "Reading the audio", 2 + seconds * 0.01))
-    if job.mode in ("arrange", "band"):
+    auto = job.mode == "auto" or getattr(job, "auto", False)
+    if auto:
+        s.append(("decide", "Listening to pick the best mode", 3 + 3 * AUTO_EXCERPT_S * SPEED["demucs"]))
+    mode = "arrange" if job.mode == "auto" else job.mode        # plan for the slower choice until decided
+    if mode in ("arrange", "band"):
         s.append(("separate", "Separating the instruments", seconds * SPEED["demucs"]))
-    if job.mode == "arrange":
+    if mode == "arrange":
         s.append(("melody", "Finding the sung melody", seconds * SPEED["basic_pitch"]))
-    if job.mode == "band":
+    if mode == "band":
         s += [("melody", "Finding the melody", seconds * SPEED["basic_pitch"]),
               ("chords", "Finding the chords", seconds * SPEED["transkun"]),
               ("bass", "Finding the bass line", seconds * SPEED["basic_pitch"]),
@@ -606,6 +842,19 @@ def process(job, work_root, lib_dir, on_update):
         prog.total = sum(s[2] for s in prog.stages)
         mix_rms = _rms(x.mean(axis=1))
 
+        if job.mode == "auto":
+            # Separate a few seconds of the song and see how much is voice, drums and bass
+            # (tests/test_auto_mode.py). Solo piano gets the more accurate piano mode.
+            prog.start("decide")
+            job.auto = True
+            try:
+                job.auto_shares = stem_shares(x)
+                job.mode = decide_mode(job.auto_shares)
+            except Exception:  # noqa: BLE001
+                job.auto_shares, job.mode = None, "arrange"       # works for any recording
+            prog.stages = plan_stages(job, seconds)
+            prog.total = sum(st[2] for st in prog.stages)
+
         parts = []
         if job.mode == "piano":
             prog.start("notes")
@@ -662,6 +911,16 @@ def process(job, work_root, lib_dir, on_update):
 
         prog.start("tempo")
         bpm = detect_tempo(x)
+        # A readable score: bar lines that follow the performance, only when the song's own notes
+        # line up with them (tests/test_score_grid.py). Otherwise the fixed tempo, exactly as before.
+        all_notes = [n for p in parts if p.channel != 9 for n in p.notes]
+        try:
+            plan = plan_score_grid(x, all_notes, bpm)
+        except Exception:  # noqa: BLE001
+            plan = None
+        beats, per_bar, downbeat = plan if plan else (None, 4, 0)
+        if plan:
+            bpm = mx.TimeGrid(bpm, beats, downbeat, per_bar).first_bpm()
         del x
         gc.collect()
 
@@ -669,20 +928,24 @@ def process(job, work_root, lib_dir, on_update):
         parts = [p for p in parts if p.notes]
         out = unique_path(lib_dir, usb.safe_filename(job.title))
         tmp = work / "song.mid"
-        mx.write_smf(parts, tmp, bpm, job.title)
-        problems = mx.verify_smf(tmp, parts, bpm)
+        mx.write_smf(parts, tmp, bpm, job.title, beats, downbeat, per_bar)
+        problems = mx.verify_smf(tmp, parts, bpm, beats, downbeat, per_bar)
         if problems:
             raise RuntimeError("MIDI self-check failed: " + "; ".join(problems))
         partial = meta_dir / (out.name + ".partial")
         shutil.copyfile(tmp, partial)
         os.replace(partial, out)                        # a stopped song never leaves a half-written file
         preview = meta_dir / (out.stem + ".mp3")
-        has_preview = render_preview(out, preview, work)
+        # A batch goes straight to the flash drive: its preview is made only if Preview is pressed.
+        has_preview = False if job.send_to_drive else render_preview(out, preview, work)
         result = {
             "file": out.name,
             "title": job.title,
             "mode": job.mode,
+            "auto": bool(getattr(job, "auto", False)),
+            "auto_shares": getattr(job, "auto_shares", None),
             "bpm": bpm,
+            "score_grid": f"{per_bar}/4" if plan else None,   # bar lines that follow the performance
             "seconds": round(seconds, 1),
             "parts": [{"name": p.name, "notes": len(p.notes), "channel": p.channel + 1} for p in parts],
             "notes": total_notes,

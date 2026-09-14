@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Clavinova MIDI Maker</title>
+<title>Midify</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎹</text></svg>">
 <style>
 :root {
@@ -48,6 +48,8 @@ button.small, .btn.small { padding: 5px 10px; font-size: 13px; border-radius: 8p
 button.link { border: 0; background: none; padding: 0; color: var(--muted); font-weight: 500; text-decoration: underline; }
 input[type=search], select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
 input[type=search] { width: 100%; font-size: 17px; }
+input[type=text] { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-left: 8px; width: 240px; }
+input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 input[type=search]:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
 .mode { border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px; cursor: pointer; background: var(--bg); }
@@ -117,8 +119,8 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
 <body>
 <div class="keys" aria-hidden="true"></div>
 <header>
-  <h1>Clavinova MIDI Maker</h1>
-  <p class="sub">Type a song or drop in a recording. Get a MIDI file your CVP-503 can play from a flash drive.</p>
+  <h1>Midify</h1>
+  <p class="sub">Type a song or drop in a recording. Get a MIDI file to play on your digital piano or keyboard, straight from a flash drive.</p>
 </header>
 <div class="banner" id="banner"></div>
 <div class="update" id="update-card" hidden role="status" aria-live="polite">
@@ -137,12 +139,24 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
   <section class="card" aria-labelledby="how-h">
     <h2 id="how-h">1. How should it sound?</h2>
     <div class="modes" role="radiogroup">
-      <label class="mode"><input type="radio" name="mode" value="arrange"><b>Piano version <span class="tag">Best for most songs</span></b><span>Any song turned into piano. The drums are taken out, the instruments become piano, and the sung melody goes in the right hand.</span></label>
+      <label class="mode"><input type="radio" name="mode" value="auto"><b>Automatic <span class="tag">Recommended</span></b><span>Listens to a few seconds first, then uses Solo piano for piano recordings and Piano version for everything else.</span></label>
+      <label class="mode"><input type="radio" name="mode" value="arrange"><b>Piano version</b><span>Any song turned into piano. The drums are taken out, the instruments become piano, and the sung melody goes in the right hand.</span></label>
       <label class="mode"><input type="radio" name="mode" value="piano"><b>Solo piano recording</b><span>The most accurate. Use it when the recording is only a piano, like a piano cover or a classical piece.</span></label>
-      <label class="mode"><input type="radio" name="mode" value="band"><b>Full band</b><span>Melody, chords, bass and drums each get their own Clavinova part. More experimental.</span></label>
+      <label class="mode"><input type="radio" name="mode" value="band"><b>Full band</b><span>Melody, chords, bass and drums each get their own part. More experimental.</span></label>
     </div>
-    <div class="opts" id="opt-split"><label><input type="checkbox" id="split"> Put the left and right hand on separate parts, so you can turn one off on the Clavinova and play it yourself</label></div>
+    <div class="opts" id="opt-split"><label><input type="checkbox" id="split"> Put the left and right hand on separate parts, so you can turn one off on your piano and play it yourself</label></div>
     <div class="opts" id="opt-melody" hidden><label>Melody instrument <select id="melody"></select></label></div>
+  </section>
+
+  <section class="card" aria-labelledby="batch-h">
+    <h2 id="batch-h">Batch to flash drive</h2>
+    <div class="opts"><label><input type="checkbox" id="auto-send"> Send each song to the flash drive when it is done</label></div>
+    <div class="opts" id="batch-opts" hidden>
+      <label>Folder on the drive <input type="text" id="drive-folder" maxlength="40" placeholder="Midify" aria-label="Folder on the flash drive"></label>
+      <p class="hint">Add as many songs as you like: search and click Make MIDI on several, or drop in a pile of recordings.
+        They are made one at a time and numbered in the order you add them (01, 02, 03...), so they play in that order on your piano.
+        If the drive is not plugged in when a song finishes, it is copied as soon as you plug it in. If you quit, unfinished songs carry on next time.</p>
+    </div>
   </section>
 
   <section class="card" aria-labelledby="find-h">
@@ -178,8 +192,8 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
     <h2 id="lib-h">History</h2>
     <input type="search" id="hist-q" placeholder="Search your songs" aria-label="Search your songs">
     <div id="library"><p class="empty">Loading...</p></div>
-    <p class="hint">Previews play through your Mac's built-in sounds, so they are rough. The Clavinova sounds much better.
-      On the Clavinova, plug the flash drive into its USB port and pick the song from the USB tab of the song list.</p>
+    <p class="hint">Previews play through your Mac's built-in sounds, so they are rough. Your piano will sound much better.
+      On your piano or keyboard, plug the flash drive into its USB port and choose the song from its song list.</p>
   </section>
   </div>
 
@@ -204,11 +218,15 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const store = { get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
                 set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
-const MODE_NAMES = { arrange: "Piano version", piano: "Solo piano", band: "Full band", imported: "From a MIDI file" };
-const S = { mode: store.get("mode", "arrange"), split: store.get("split", true), melody: store.get("melody", 73),
-            drives: [], drive: store.get("drive", null), jobs: [], seenDone: new Set(), highlight: null, status: {} };
+const MODE_NAMES = { auto: "Automatic", arrange: "Piano version", piano: "Solo piano", band: "Full band", imported: "From a MIDI file" };
+const modeLabel = (it) => (it.auto ? "Automatic: " : "") + (MODE_NAMES[it.mode] || "MIDI");
+const S = { mode: store.get("mode", "auto"), split: store.get("split", true), melody: store.get("melody", 73),
+            drives: [], drive: store.get("drive", null), jobs: [], seenDone: new Set(), highlight: null, status: {},
+            autoSend: store.get("autoSend", false), folder: store.get("folder", "Midify") };
+// What every new song carries, so it knows whether and where to copy itself when it is done.
+const batchFields = () => ({ send_to_drive: !!S.autoSend, drive_path: S.drive || null, drive_folder: (S.folder || "").trim() });
 
-const LOST = "Lost connection to the engine. It reconnects by itself. If this keeps happening, quit Clavinova MIDI Maker with Cmd+Q and open it again.";
+const LOST = "Lost connection to the engine. It reconnects by itself. If this keeps happening, quit Midify with Cmd+Q and open it again.";
 async function api(path, opts = {}) {
   const o = { ...opts, headers: { ...(opts.headers || {}) } };
   if (o.method && o.method !== "GET") o.headers["x-clavinova"] = "1";
@@ -236,6 +254,11 @@ function initModes() {
     r.checked = r.value === S.mode;
     r.addEventListener("change", () => { S.mode = r.value; store.set("mode", S.mode); syncOpts(); });
   });
+  $("#auto-send").checked = !!S.autoSend;
+  $("#batch-opts").hidden = !S.autoSend;
+  $("#drive-folder").value = S.folder;
+  $("#auto-send").addEventListener("change", e => { S.autoSend = e.target.checked; store.set("autoSend", S.autoSend); $("#batch-opts").hidden = !S.autoSend; });
+  $("#drive-folder").addEventListener("input", e => { S.folder = e.target.value; store.set("folder", S.folder); });
   $("#split").checked = !!S.split;
   $("#split").addEventListener("change", e => { S.split = e.target.checked; store.set("split", S.split); });
   $("#melody").addEventListener("change", e => { S.melody = +e.target.value; store.set("melody", S.melody); });
@@ -287,7 +310,7 @@ function renderYouTube(d) {
     b.addEventListener("click", async () => {
       b.disabled = true;
       try {
-        await api("/api/jobs", { method: "POST", json: { video_id: v.id, title: v.title, duration: v.duration, mode: S.mode, melody_program: +S.melody, split_hands: !!S.split } });
+        await api("/api/jobs", { method: "POST", json: { video_id: v.id, title: v.title, duration: v.duration, mode: S.mode, melody_program: +S.melody, split_hands: !!S.split, ...batchFields() } });
         b.textContent = "Added"; toast(`Making "${v.title}". This takes a few minutes.`); refreshJobs(true);
       } catch (err) { b.disabled = false; toast(err.message, 6000); }
     });
@@ -303,25 +326,38 @@ const drop = $("#drop");
 ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
 window.addEventListener("dragover", e => e.preventDefault());
 window.addEventListener("drop", e => e.preventDefault());
-drop.addEventListener("drop", e => [...(e.dataTransfer?.files || [])].forEach(uploadFile));
-$("#file").addEventListener("change", e => { [...e.target.files].forEach(uploadFile); e.target.value = ""; });
+drop.addEventListener("drop", e => queueUploads([...(e.dataTransfer?.files || [])]));
+$("#file").addEventListener("change", e => { queueUploads([...e.target.files]); e.target.value = ""; });
 
-function uploadFile(file) {
+// One file at a time, in the order they were dropped, so a batch is numbered in that order.
+const uploadQueue = []; let uploading = false;
+function queueUploads(files) { uploadQueue.push(...files); if (!uploading) nextUpload(); }
+async function nextUpload() {
+  const file = uploadQueue.shift();
+  if (!file) { uploading = false; return; }
+  uploading = true;
+  await uploadFile(file, uploadQueue.length);
+  nextUpload();
+}
+
+function uploadFile(file, left = 0) { return new Promise(resolve => {
   const fd = new FormData();
   fd.append("file", file); fd.append("mode", S.mode); fd.append("melody_program", S.melody); fd.append("split_hands", S.split ? "true" : "false");
+  const b = batchFields(); fd.append("send_to_drive", b.send_to_drive ? "true" : "false"); fd.append("drive_path", b.drive_path || ""); fd.append("drive_folder", b.drive_folder);
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/upload"); xhr.setRequestHeader("x-clavinova", "1");
   toast(`Uploading "${file.name}"...`, 60000);
   xhr.upload.onprogress = e => { if (e.lengthComputable) toast(`Uploading "${file.name}": ${Math.round(100 * e.loaded / e.total)}%`, 60000); };
   xhr.onload = () => {
     let d = {}; try { d = JSON.parse(xhr.responseText); } catch {}
-    if (xhr.status >= 400) { toast(d.detail || "That file could not be added.", 7000); return; }
+    if (xhr.status >= 400) { toast(d.detail || "That file could not be added.", 7000); resolve(); return; }
     if (d.imported) { S.highlight = d.imported; S.justMade = d.imported; toast(`Added "${d.imported}". It is kept in History.`); refreshLibrary(); }
-    else { toast(`Making "${file.name}". This takes a few minutes.`); refreshJobs(true); }
+    else { toast(left ? `Added "${file.name}". ${left} more to add...` : `Making "${file.name}". This takes a few minutes.`); refreshJobs(true); }
+    resolve();
   };
-  xhr.onerror = () => toast("Upload failed. Is the app still running?", 7000);
+  xhr.onerror = () => { toast("Upload failed. Is the app still running?", 7000); resolve(); };
   xhr.send(fd);
-}
+}); }
 
 /* ---------- jobs ---------- */
 let jobTimer;
@@ -358,6 +394,13 @@ function renderJobs() {
     else if (j.status === "done") body = `<div class="msg ok">Done. It is just below, and it is kept in History.</div>`;
     else if (j.status === "cancelled") body = `<div class="meta">Cancelled.</div>`;
     else if (j.status === "error") body = `<div class="msg bad">${esc(j.error)}</div>`;
+    if (j.send_to_drive && !["error", "cancelled"].includes(j.status)) {
+      const where = j.drive_folder ? ` in "${esc(j.drive_folder)}"` : "";
+      if (j.drive_status === "sent") body += `<div class="meta">On the flash drive as ${esc(j.drive_file)}</div>`;
+      else if (j.drive_status === "waiting") body += `<div class="msg warn">Waiting for the flash drive. Plug it in and this song is copied${where} straight away.</div>`;
+      else if (j.drive_status) body += `<div class="msg bad">Not copied to the flash drive: ${esc(j.drive_status)}</div>`;
+      else body += `<div class="meta">Goes to the flash drive${where} when it is done.</div>`;
+    }
     el.innerHTML = `<div class="row"><div class="grow"><b>${esc(j.title)}</b> <span class="meta">${esc(MODE_NAMES[j.mode] || j.mode)}</span></div></div>${body}`;
     const row = el.firstElementChild;
     if (j.status === "running" || j.status === "queued") {
@@ -423,12 +466,19 @@ function songCard(it) {
     const el = document.createElement("div"); el.className = "song" + (it.file === S.highlight ? " new" : "");
     const parts = (it.parts || []).map(p => `${p.name} (${p.notes})`).join(", ");
     el.innerHTML = `<div class="t">${esc(it.title)}</div>
-      <div class="meta">${esc(MODE_NAMES[it.mode] || "MIDI")}${it.seconds ? " · " + fmtDur(it.seconds) : ""}${it.bpm ? " · " + Math.round(it.bpm) + " BPM" : ""}${parts ? " · " + esc(parts) : ""}</div>`;
+      <div class="meta">${esc(modeLabel(it))}${it.seconds ? " · " + fmtDur(it.seconds) : ""}${it.bpm ? " · " + Math.round(it.bpm) + " BPM" : ""}${it.score_grid ? " · readable score, " + esc(it.score_grid) : ""}${parts ? " · " + esc(parts) : ""}</div>`;
     const acts = document.createElement("div"); acts.className = "actions";
     const enc = encodeURIComponent(it.file);
     if (it.preview) {
       const p = document.createElement("button"); p.className = "small"; p.textContent = "▶ Preview";
-      p.onclick = () => { const a = document.createElement("audio"); a.controls = true; a.src = `/api/library/${enc}/preview`; el.append(a); a.play().catch(() => {}); p.remove(); };
+      p.onclick = () => {
+        // Older previews are made on the spot, which takes a few seconds for a long song.
+        p.disabled = true; p.textContent = "Preparing preview...";
+        const a = document.createElement("audio"); a.controls = true; a.preload = "auto";
+        a.oncanplay = () => { p.remove(); a.play().catch(() => {}); };
+        a.onerror = () => { a.remove(); p.disabled = false; p.textContent = "▶ Preview"; toast("The preview could not be made.", 5000); };
+        a.src = `/api/library/${enc}/preview`; el.append(a);
+      };
       acts.append(p);
     }
     const send = document.createElement("button"); send.className = "small primary"; send.textContent = "Send to flash drive";
@@ -478,7 +528,7 @@ async function tidyDrive(d, btn) {
   try {
     const r = await api("/api/drives/tidy", { method: "POST", json: { drive: d.path, dry_run: true } });
     if (!r.found) { toast(`${d.name} is already tidy.`); return; }
-    if (!confirm(`${d.name} has ${r.found} hidden Mac file(s), like ${r.examples.slice(0, 3).join(", ")}. They are not songs, and the Clavinova may show them as broken files. Remove them?`)) return;
+    if (!confirm(`${d.name} has ${r.found} hidden Mac file(s), like ${r.examples.slice(0, 3).join(", ")}. They are not songs, and many pianos and keyboards show them as broken files. Remove them?`)) return;
     const done = await api("/api/drives/tidy", { method: "POST", json: { drive: d.path, dry_run: false } });
     toast(`Removed ${done.removed} hidden file(s) from ${d.name}.`);
   } catch (e) { toast(e.message, 6000); } finally { btn.disabled = false; }
@@ -486,8 +536,8 @@ async function tidyDrive(d, btn) {
 async function sendToDrive(file, btn) {
   const d = currentDrive();
   if (!d) { toast("Plug in your flash drive first. It will show up in the Flash drive box.", 5000); $("#drive-h").scrollIntoView({ behavior: "smooth" }); return; }
-  if (d.status === "bad" && !confirm(`${d.name} is formatted ${d.filesystem}, which the Clavinova cannot read. Copy anyway?`)) return;
-  if (d.status === "warn" && !confirm(`${d.name} is exFAT, which the CVP-503 probably cannot read. Copy anyway?`)) return;
+  if (d.status === "bad" && !confirm(`${d.name} is formatted ${d.filesystem}, which most digital pianos and keyboards cannot read. Copy anyway?`)) return;
+  if (d.status === "warn" && !confirm(`${d.name} is exFAT, which many digital pianos and keyboards cannot read. Copy anyway?`)) return;
   btn.disabled = true; const old = btn.textContent; btn.textContent = "Copying...";
   try {
     const r = await api("/api/drives/copy", { method: "POST", json: { drive: d.path, name: file } });

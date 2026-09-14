@@ -8,7 +8,7 @@ import unicodedata
 from pathlib import Path
 
 VOLUMES = Path("/Volumes")
-NAME_LIMIT = 40          # keeps names readable on the Clavinova's song list
+NAME_LIMIT = 40          # keeps names readable on a piano's small screen
 
 
 def safe_filename(title, ext=".mid"):
@@ -56,13 +56,13 @@ def list_drives():
         except OSError:
             free = total = 0
         if fs_type == "msdos":
-            status, note = "good", f"{fs_name}: the Clavinova can read this."
+            status, note = "good", f"{fs_name}: digital pianos and keyboards can read this."
         elif fs_type == "exfat":
-            status, note = "warn", ("This drive is formatted exFAT. The CVP-503 is from 2007 and very likely "
-                                    "cannot read exFAT. Reformat it as MS-DOS (FAT32) in Disk Utility, "
-                                    "or on the Clavinova itself.")
+            status, note = "warn", ("This drive is formatted exFAT, which many digital pianos and keyboards "
+                                    "cannot read. If yours does not see the songs, reformat the drive as "
+                                    "MS-DOS (FAT32) in Disk Utility, or on the piano itself.")
         else:
-            status, note = "bad", (f"This drive is formatted {fs_name}, which the Clavinova cannot read. "
+            status, note = "bad", (f"This drive is formatted {fs_name}, which digital pianos and keyboards cannot read. "
                                    "Reformat it as MS-DOS (FAT32) in Disk Utility.")
         drives.append({
             "name": info.get("VolumeName") or vol.name,
@@ -131,13 +131,17 @@ def copy_to_drive(src, drive_path, filename=None, subfolder=""):
         raise IOError("The copy did not finish. Was the drive unplugged? Plug it back in and try again.")
     _remove_appledouble(folder, tmp.name)
     _remove_appledouble(folder, dest.name)
+    if subfolder:
+        # macOS leaves a hidden "._<folder>" beside a folder it creates on a FAT drive (caught by
+        # tests/test_batch.py). Pianos can list it as a broken item, so take it away.
+        _remove_appledouble(Path(d["path"]), folder.name)
     if dest.read_bytes() != src.read_bytes():
         raise IOError("The copy on the flash drive does not match. Try again or try another drive.")
     return {"path": str(dest), "name": dest.name, "already_there": False}
 
 
 def mac_clutter(drive_path):
-    """Hidden files macOS leaves on drives. The Clavinova may list them as broken songs."""
+    """Hidden files macOS leaves on drives. Pianos and keyboards may list them as broken songs."""
     d = resolve_drive(drive_path)
     if not d:
         raise ValueError("That flash drive is not connected any more.")

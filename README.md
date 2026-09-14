@@ -1,7 +1,7 @@
-# Clavinova MIDI Maker
+# Midify
 
-Type a song name (or drop in a recording) and get a MIDI file your Yamaha
-Clavinova CVP-503 can play from a USB flash drive.
+Type a song name (or drop in a recording) and get a MIDI file to play on your
+digital piano or keyboard, straight from a USB flash drive.
 
 ## Set it up (first time only)
 
@@ -22,13 +22,13 @@ double-click on the app runs it for you.
 
 ## Start it
 
-Open **Clavinova MIDI Maker** from your Applications folder (see [The Mac
+Open **Midify** from your Applications folder (see [The Mac
 app](#the-mac-app) below to install it there). It opens as a normal Mac window
 with its own Dock icon and menu bar. Cmd+Q quits it, which stops everything.
 
 The first start takes about 20 seconds while the AI models load.
 
-There is also **Clavinova MIDI Maker.command** in this folder, which does the
+There is also **Midify.command** in this folder, which does the
 same thing from a checkout of the code.
 
 ## Use it
@@ -38,11 +38,11 @@ same thing from a checkout of the code.
      instruments become piano, and the sung melody goes in the right hand.
    - **Solo piano recording**: the most accurate. Use it for recordings that
      are only a piano (piano covers, classical pieces).
-   - **Full band**: melody, chords, bass and drums on separate Clavinova parts.
+   - **Full band**: melody, chords, bass and drums on separate parts.
      More experimental.
    - In the piano modes you can put each hand on its own part (right hand on
-     channel 1, left hand on channel 2), so you can turn one hand off on the
-     Clavinova and play it yourself.
+     channel 1, left hand on channel 2), so you can turn one hand off on your
+     piano and play it yourself.
 2. **Find a song**: type the name and artist. Adding "piano" finds piano
    covers, which give the cleanest results. If BitMidi already has a hand-made
    MIDI of the song, it is listed first with a link. Those are usually better
@@ -52,24 +52,24 @@ same thing from a checkout of the code.
 4. **Send to flash drive**: plug the drive in, click *Send to flash drive*,
    then *Eject* before unplugging.
 
-On the Clavinova, plug the drive into its USB port and pick the song from the
-USB tab of the song list.
+On your piano or keyboard, plug the drive into its USB port and choose the song
+from its song list.
 
 ## Where things go
 
-- Finished songs: `~/Music/Clavinova MIDI/` (previews and details are kept in a
-  hidden `.clavinova` folder next to them).
+- Finished songs: `~/Music/Midify/` (previews and details are kept in a hidden
+  folder next to them). A songs folder from before the rename is moved there once.
 - *Remove* moves a song to the Mac's Trash. Nothing is deleted outright.
 
 ## Flash drive tips
 
 - The drive should be formatted **MS-DOS (FAT32)**. The app shows a green dot
-  for drives the Clavinova can read, and a warning for exFAT or Mac formats.
-- Macs leave hidden files (like `._Song.mid`) on drives, which the Clavinova can
+  for drives digital pianos and keyboards can read, and a warning for exFAT or Mac formats.
+- Macs leave hidden files (like `._Song.mid`) on drives, which many pianos and keyboards can
   list as broken songs. The app never creates them when it copies, and
   **Tidy** removes any that are already there.
 - File names are kept short and plain (letters, numbers, spaces) so they read
-  well on the Clavinova's screen.
+  well on a piano's small screen.
 
 ## What to expect
 
@@ -122,7 +122,7 @@ the app itself uses about 0.3 GB.
 - Melody and bass: Spotify's Basic Pitch.
 - Drums: a band-split onset detector written for this app.
 - Output: Standard MIDI File format 0 with a General MIDI reset at the start,
-  which every Clavinova that reads MIDI files can play. Every file is read back
+  which every digital piano and keyboard that reads MIDI files can play. Every file is read back
   and checked before it is saved.
 
 ## The Mac app
@@ -138,7 +138,7 @@ curl -fsSL https://raw.githubusercontent.com/koderking25/clavinova-midi/main/mac
 ```
 
 That downloads the code, sets up its private Python environment, builds the app
-and puts **Clavinova MIDI Maker** in your Applications folder. Opening it the
+and puts **Midify** in your Applications folder. Opening it the
 first time downloads the AI models, which takes about ten minutes and needs
 [Homebrew](https://brew.sh) for the audio tools.
 
@@ -157,7 +157,7 @@ the whole thing, because the app is built on your Mac rather than downloaded, so
 it never gets flagged. To clear the flag on a copy you already downloaded:
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/Clavinova MIDI Maker.app"
+xattr -dr com.apple.quarantine "/Applications/Midify.app"
 ```
 
 ### Updates install themselves
@@ -181,7 +181,8 @@ A failed update never leaves you without a working app:
 Publishing a release the updater will accept: bump `VERSION` in
 `mac/build_app.py`, build the app and the disk image, and attach the disk image
 to a release tagged `v` plus that version, named exactly
-`Clavinova-MIDI-Maker.dmg`. A mismatched tag or file name is refused.
+`Midify.dmg`. Also attach the same file as `Clavinova-MIDI-Maker.dmg`: apps from before the
+rename look for that name, and it is how they update into Midify. A mismatched tag or file name is refused.
 
 To rebuild the app and its disk image after changing the code:
 

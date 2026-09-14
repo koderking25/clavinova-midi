@@ -20,7 +20,7 @@ import os
 STATE = Path(os.environ.get("CLAVINOVA_STATE", Path(__file__).resolve().parent.parent / "state"))
 STATE.mkdir(parents=True, exist_ok=True)
 COOLDOWN_FILE = STATE / "cooldowns.json"
-UA = "ClavinovaMIDIMaker/1.0 (personal, one request per search)"
+UA = "Midify/1.0 (personal, one request per search)"
 
 MIN_GAP = {"youtube": 2.0, "bitmidi": 3.0}
 COOLDOWN_S = {"youtube": 30 * 60, "bitmidi": 60 * 60}

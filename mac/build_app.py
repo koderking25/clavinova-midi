@@ -1,4 +1,4 @@
-"""Build "Clavinova MIDI Maker.app" and a zip of it.
+"""Build "Midify.app" and a zip of it.
 
     .venv/bin/python mac/build_app.py
 
@@ -19,9 +19,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BUILD = os.path.join(HERE, "build")
-NAME = "Clavinova MIDI Maker"
+NAME = "Midify"
+# Hidden support folder keeps its old name: it holds the private Python and AI models, and
+# renaming it would force every existing install through the ten minute setup again.
+SUPPORT_NAME = "Clavinova MIDI Maker"
 APP = os.path.join(BUILD, f"{NAME}.app")
-VERSION = "1.4.1"
+VERSION = "1.5.0"
 
 LAUNCHER = r"""#!/bin/bash
 # Starts the app: sets up the environment on first run, then opens the app's own
@@ -31,7 +34,7 @@ BUNDLE="$(cd "$(dirname "$0")/.." && pwd)"
 RES="$BUNDLE/Resources"
 SUPPORT="$HOME/Library/Application Support/Clavinova MIDI Maker"
 LOG_DIR="$HOME/Library/Logs"
-LOG="$LOG_DIR/Clavinova MIDI Maker.log"
+LOG="$LOG_DIR/Midify.log"
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 export CLAVINOVA_WORK="$SUPPORT/work"
@@ -42,7 +45,7 @@ export PYTHONPYCACHEPREFIX="$SUPPORT/pycache"
 mkdir -p "$SUPPORT" "$CLAVINOVA_WORK" "$CLAVINOVA_STATE" "$LOG_DIR"
 
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >>"$LOG"; }
-alert() { osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 with title \"Clavinova MIDI Maker\"" >/dev/null 2>&1; }
+alert() { osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 with title \"Midify\"" >/dev/null 2>&1; }
 
 # No "already running" shortcut here. One used to open the page in a web browser, which is
 # exactly what the app no longer does; desktop.py handles a second copy itself, in a window.
@@ -50,7 +53,7 @@ alert() { osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 
 VENV="$SUPPORT/venv"
 if [ ! -x "$VENV/bin/python" ]; then
   if ! command -v brew >/dev/null 2>&1; then
-    alert "Clavinova MIDI Maker needs Homebrew for its audio tools.\n\nInstall it from https://brew.sh, then open this app again."
+    alert "Midify needs Homebrew for its audio tools.\n\nInstall it from https://brew.sh, then open this app again."
     exit 1
   fi
   osascript -e 'display dialog "First time setup: this downloads the AI models and takes about ten minutes. A Terminal window will show what it is doing." buttons {"Set up now", "Later"} default button 1 with title "Clavinova MIDI Maker"' >/dev/null 2>&1 || exit 0
@@ -114,6 +117,24 @@ int main(void) {
     snprintf(contents, sizeof contents, "%s", macos);
     parent(contents);                                      /* .../Contents */
 
+    /* The app used to be called "Clavinova MIDI Maker", and an update installs into that same place.
+       Rename it before anything runs from inside it, and only if nothing is already called Midify. */
+    {
+        char bundle[PATH_MAX], dir[PATH_MAX], renamed[PATH_MAX];
+        snprintf(bundle, sizeof bundle, "%s", contents);
+        parent(bundle);                                    /* .../Something.app */
+        const char *base = strrchr(bundle, '/');
+        if (base && strcmp(base + 1, "Clavinova MIDI Maker.app") == 0) {
+            snprintf(dir, sizeof dir, "%s", bundle);
+            parent(dir);
+            snprintf(renamed, sizeof renamed, "%s/Midify.app", dir);
+            if (access(renamed, F_OK) != 0 && rename(bundle, renamed) == 0) {
+                snprintf(contents, sizeof contents, "%s/Contents", renamed);
+                snprintf(macos, sizeof macos, "%s/Contents/MacOS", renamed);
+            }
+        }
+    }
+
     const char *home = getenv("HOME");
     if (!home || !*home) return 1;
     char support[PATH_MAX], work[PATH_MAX], state[PATH_MAX], pycache[PATH_MAX];
@@ -123,7 +144,7 @@ int main(void) {
     snprintf(state, sizeof state, "%s/state", support);
     snprintf(pycache, sizeof pycache, "%s/pycache", support);
     snprintf(logdir, sizeof logdir, "%s/Library/Logs", home);
-    snprintf(logfile, sizeof logfile, "%s/Clavinova MIDI Maker.log", logdir);
+    snprintf(logfile, sizeof logfile, "%s/Midify.log", logdir);
     snprintf(python, sizeof python, "%s/venv/bin/python", support);
     snprintf(desktop, sizeof desktop, "%s/Resources/app/desktop.py", contents);
     snprintf(script, sizeof script, "%s/launch", macos);
@@ -157,7 +178,7 @@ int main(void) {
 """
 
 SETUP = r"""#!/bin/bash
-# One time setup for Clavinova MIDI Maker: a private Python environment and the AI models.
+# One time setup for Midify: a private Python environment and the AI models.
 set -euo pipefail
 RES="$(cd "$(dirname "$0")" && pwd)"
 SUPPORT="$HOME/Library/Application Support/Clavinova MIDI Maker"
@@ -195,7 +216,7 @@ pipeline.MODELS.warm_up()
 sys.exit(0 if pipeline.MODELS.ready else f"models did not load: {pipeline.MODELS.error}")
 PY
 
-say "Done. You can close this window and open Clavinova MIDI Maker."
+say "Done. You can close this window and open Midify."
 """
 
 
@@ -269,7 +290,7 @@ def main():
         plistlib.dump(plist, f)
 
     run("codesign", "--force", "--deep", "--sign", "-", APP)      # ad hoc: stops "damaged" errors
-    zip_path = os.path.join(BUILD, "Clavinova-MIDI-Maker.zip")
+    zip_path = os.path.join(BUILD, "Midify.zip")
     run("ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", APP, zip_path)
 
     size = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(APP) for f in fs)

@@ -1,4 +1,4 @@
-<title>Clavinova MIDI Maker</title>
+<title>Midify</title>
 <style>
   :root {
     --ink: #2b2521; --dim: #7c7167; --line: #e2d9cd; --card: #fffdf9; --bg: #f7f2e9;
@@ -48,8 +48,8 @@
 </style>
 <div class="keys"></div>
 <main>
-  <h1>Clavinova MIDI Maker</h1>
-  <p class="sub">Drop in a recording and get a MIDI file your Clavinova can play from a flash drive.
+  <h1>Midify</h1>
+  <p class="sub">Drop in a recording and get a MIDI file to play on your digital piano or keyboard, straight from a flash drive.
     Everything happens on your own computer: nothing is uploaded.</p>
 
   <section>
@@ -95,7 +95,7 @@
       browser to do something browsers were never built for. The Mac app is the real thing:</p>
     <ul style="margin:0 0 14px">
       <li><b>Any song, not just piano.</b> It pulls the drums, bass, chords and singing apart first, so a
-        full band becomes a piano version with the tune in your right hand, or four separate Clavinova parts.</li>
+        full band becomes a piano version with the tune in your right hand, or four separate parts.</li>
       <li><b>About five times faster</b>, because it runs the models properly instead of inside a tab.</li>
       <li><b>Type a song name</b> and pick a recording, instead of hunting for a file first.</li>
       <li><b>The full flash drive treatment</b>: it checks the format, copies without leaving hidden Mac
@@ -104,7 +104,7 @@
     </ul>
     <div class="row">
       <a class="btn" id="appLink"
-         href="https://github.com/koderking25/clavinova-midi/releases/latest/download/Clavinova-MIDI-Maker.dmg">Download the Mac app</a>
+         href="https://github.com/koderking25/clavinova-midi/releases/latest/download/Midify.dmg">Download the Mac app</a>
       <span class="muted">Apple Silicon Mac. Free. Nothing uploaded, nobody's server.</span>
     </div>
 
@@ -125,7 +125,7 @@
   </section>
 
   <footer>
-    On the Clavinova, plug the flash drive into its USB port and pick the song from the USB tab of the song list.
+    On your piano or keyboard, plug the flash drive into its USB port and choose the song from its song list.
   </footer>
 </main>
 
@@ -242,10 +242,10 @@
     $("#driveInfo").textContent = "Checking the drive...";
     const guess = await drive.guessFormat(state.dir);
     const words = {
-      fat32: ["good", "This looks like a FAT32 drive, which is what the Clavinova reads."],
-      "one-second": ["warn", "This drive does not look like FAT32. The Clavinova may not read it. In Disk Utility, erase it as MS-DOS (FAT32)."],
-      fine: ["warn", "This drive does not look like FAT32 (it keeps file times too precisely). The Clavinova may not read it. In Disk Utility, erase it as MS-DOS (FAT32)."],
-      unknown: ["muted", "Could not tell how this drive is formatted. If the Clavinova does not see the song, erase the drive as MS-DOS (FAT32)."],
+      fat32: ["good", "This looks like a FAT32 drive, which is what most digital pianos and keyboards read."],
+      "one-second": ["warn", "This drive does not look like FAT32. Your piano may not read it. In Disk Utility, erase it as MS-DOS (FAT32)."],
+      fine: ["warn", "This drive does not look like FAT32 (it keeps file times too precisely). Your piano may not read it. In Disk Utility, erase it as MS-DOS (FAT32)."],
+      unknown: ["muted", "Could not tell how this drive is formatted. If your piano does not see the song, erase the drive as MS-DOS (FAT32)."],
     }[guess.verdict];
     $("#driveInfo").className = `muted ${words[0]}`;
     $("#driveInfo").textContent = `${state.dir.name}: ${words[1]}`;
@@ -273,7 +273,7 @@
       }
       const done = await drive.tidyDrive(state.dir, { dryRun: false });
       $("#driveInfo").className = "muted good";
-      $("#driveInfo").textContent = `Removed ${done.removed} hidden Mac ${done.removed === 1 ? "file" : "files"} the Clavinova might have listed as broken songs.`;
+      $("#driveInfo").textContent = `Removed ${done.removed} hidden Mac ${done.removed === 1 ? "file" : "files"} your piano might have listed as broken songs.`;
     } catch (err) {
       fail(err.message);
     }

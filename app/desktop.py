@@ -36,7 +36,7 @@ from AppKit import (NSApplication, NSApplicationActivationPolicyRegular, NSBacki
 from Foundation import NSObject, NSURL, NSURLRequest  # noqa: E402
 from WebKit import WKWebView, WKWebViewConfiguration  # noqa: E402
 
-TITLE = "Clavinova MIDI Maker"
+TITLE = "Midify"
 MIN_SIZE = (820, 620)
 START_SIZE = (1060, 820)
 
@@ -194,11 +194,7 @@ def serve_in_background():
     import pipeline
     import server
 
-    import updater
-    server.clean_leftovers()
-    threading.Thread(target=pipeline.check_models_in_child, daemon=True).start()
-    threading.Thread(target=server.worker, daemon=True).start()
-    threading.Thread(target=updater.startup, daemon=True).start()
+    server.start_background()                         # queue carried over, drive sender, updates
     config = uvicorn.Config(server.app, host="127.0.0.1", port=server.PORT, log_level="warning")
     running = uvicorn.Server(config)
     running.install_signal_handlers = lambda: None
@@ -214,6 +210,14 @@ def wait_for_server(url, seconds=90):
         except Exception:  # noqa: BLE001
             time.sleep(0.3)
     return False
+
+
+def port_in_use(url):
+    import socket
+    port = int(url.rsplit(":", 1)[1])
+    with socket.socket() as sock:
+        sock.settimeout(0.5)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
 def already_running(url):
@@ -247,7 +251,7 @@ LOADING_PAGE = """<!doctype html><html><head><meta charset="utf-8">
   @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
   .err { color: var(--accent); max-width: 420px; line-height: 1.5; }
 </style></head><body><div class="keys"></div>
-<main><h1>Clavinova MIDI Maker</h1><p id="msg">Starting up&hellip;</p><div class="bar" id="bar"><i></i></div></main>
+<main><h1>Midify</h1><p id="msg">Starting up&hellip;</p><div class="bar" id="bar"><i></i></div></main>
 </body></html>"""
 
 
@@ -263,7 +267,10 @@ def show_problem(web, text):
 def start_engine(web, url):
     """Runs off the main thread: start the engine, then point the window at it."""
     from PyObjCTools import AppHelper
-    if not already_running(url):                      # a second copy just uses the first one's engine
+    # Only ever one engine. A busy engine can be slow to answer, so the port itself decides: if
+    # anything is listening there, use it. A second engine would run start-up cleaning, which
+    # removes work files a song in the other window may still be using.
+    if not port_in_use(url) and not already_running(url):
         threading.Thread(target=serve_in_background, daemon=True).start()
     if wait_for_server(url):
         print(f"engine ready after {time.time() - STARTED:.1f} s", flush=True)
@@ -272,7 +279,7 @@ def start_engine(web, url):
         print("the engine did not start within 90 s", flush=True)
         AppHelper.callAfter(show_problem, web, "The app could not start its engine. Quit it with Cmd+Q and "
                             "open it again. If it keeps happening, the details are in "
-                            "~/Library/Logs/Clavinova MIDI Maker.log")
+                            "~/Library/Logs/Midify.log")
 
 
 def main():
@@ -322,7 +329,7 @@ def main():
     window.makeKeyAndOrderFront_(None)
     app.activateIgnoringOtherApps_(True)
 
-    # Written to ~/Library/Logs/Clavinova MIDI Maker.log so the app can be checked
+    # Written to ~/Library/Logs/Midify.log so the app can be checked
     # without watching the screen.
     from Foundation import NSBundle
     info = NSBundle.mainBundle().infoDictionary() or {}

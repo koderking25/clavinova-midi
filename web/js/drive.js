@@ -6,7 +6,7 @@
 
 const DB = "clavinova-drive";
 const STORE = "handles";
-const NAME_LIMIT = 40;          // keeps song names readable on the Clavinova's list
+const NAME_LIMIT = 40;          // keeps song names readable on a piano's small screen
 
 export const supported = typeof window !== "undefined" && "showDirectoryPicker" in window;
 
@@ -86,7 +86,7 @@ async function exists(dir, name) {
   }
 }
 
-/** macOS writes these next to real files. The Clavinova can list them as broken songs. */
+/** macOS writes these next to real files. Pianos and keyboards can list them as broken songs. */
 async function removeSidecar(dir, name) {
   try {
     await dir.removeEntry("._" + name);
@@ -170,7 +170,7 @@ export async function tidyDrive(dir, { dryRun = true } = {}) {
 // ---------------------------------------------------------------- format check
 
 /**
- * Guess whether the drive is formatted FAT32, which is what the Clavinova reads.
+ * Guess whether the drive is formatted FAT32, which is what most digital pianos and keyboards read.
  *
  * A browser cannot ask what a drive is formatted as. But FAT32 stores file times
  * in 2 second steps, so every file it writes lands on an even second. Other

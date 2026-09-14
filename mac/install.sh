@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install Clavinova MIDI Maker on a Mac, without fighting macOS about unsigned downloads.
+# Install Midify on a Mac, without fighting macOS about unsigned downloads.
 #
 #   curl -fsSL https://raw.githubusercontent.com/koderking25/clavinova-midi/main/mac/install.sh | bash
 #
@@ -35,7 +35,7 @@ say "Building the app"
 .venv/bin/python mac/build_app.py
 
 say "Putting it in your Applications folder"
-rm -rf "/Applications/Clavinova MIDI Maker.app"
-cp -R "mac/build/Clavinova MIDI Maker.app" /Applications/
+rm -rf "/Applications/Midify.app" "/Applications/Clavinova MIDI Maker.app"   # the old name, from before the rename
+cp -R "mac/build/Midify.app" /Applications/
 
-say "Done. Open Clavinova MIDI Maker from your Applications folder or Spotlight."
+say "Done. Open Midify from your Applications folder or Spotlight."

@@ -23,9 +23,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from make_icon import Canvas  # noqa: E402
 
-NAME = "Clavinova MIDI Maker"
+NAME = "Midify"
 APP = os.path.join(HERE, "build", f"{NAME}.app")
-DMG = os.path.join(HERE, "build", "Clavinova-MIDI-Maker.dmg")
+DMG = os.path.join(HERE, "build", "Midify.dmg")
 
 WINDOW = (640, 400)                     # points
 APP_AT = (170, 190)                     # icon centres, in points from the top left
@@ -81,7 +81,7 @@ def write_png(canvas, w, h, path):
 def verify(dmg):
     """Mount it read only and check that what people will see is really inside."""
     problems = []
-    mount = tempfile.mkdtemp(prefix="clavinova-dmg-")
+    mount = tempfile.mkdtemp(prefix="midify-dmg-")
     r = subprocess.run(["hdiutil", "attach", dmg, "-readonly", "-nobrowse", "-noautoopen",
                         "-mountpoint", mount], capture_output=True, text=True)
     if r.returncode != 0:

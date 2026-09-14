@@ -122,7 +122,7 @@ def make_old_copy():
     shutil.rmtree(fake, ignore_errors=True)
     for leftover in apps.glob(".*"):
         shutil.rmtree(leftover, ignore_errors=True)
-    subprocess.run(["ditto", str(REPO / "mac/build/Clavinova MIDI Maker.app"), str(fake)], check=True)
+    subprocess.run(["ditto", str(REPO / "mac/build/Midify.app"), str(fake)], check=True)
     p = fake / "Contents/Info.plist"
     info = plistlib.loads(p.read_bytes())
     info["CFBundleShortVersionString"] = info["CFBundleVersion"] = "1.2.9"
