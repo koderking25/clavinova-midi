@@ -123,6 +123,11 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
   <p class="sub">Type a song or drop in a recording. Get a MIDI file to play on your digital piano or keyboard, straight from a flash drive.</p>
 </header>
 <div class="banner" id="banner"></div>
+<div class="update" id="health-card" hidden role="status" aria-live="polite">
+  <div class="grow" id="health-text"></div>
+  <button class="small primary" id="health-fix" hidden></button>
+  <button class="small" id="health-log">Open the log</button>
+</div>
 <div class="update" id="update-card" hidden role="status" aria-live="polite">
   <div class="grow" id="update-text"></div>
   <a class="link" id="update-notes" href="#" target="_blank" rel="noopener" hidden>What's new</a>
@@ -211,6 +216,7 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
   <button class="link" id="lib-btn">Open songs folder</button>
   <span id="st-version"></span>
   <button class="link" id="check-update-btn" hidden>Check for updates</button>
+  <button class="link" id="health-btn">Check Midify</button>
 </footer>
 
 <script>
@@ -571,6 +577,54 @@ $("#update-btn").addEventListener("click", async e => {
 $("#lib-btn").addEventListener("click", () => api("/api/open-library", { method: "POST" }).catch(e => toast(e.message)));
 
 initModes();
+/* ---------- is anything wrong ---------- */
+const FIX_LABELS = { rebuild_python: "Repair the setup", install_tools: "Install the tools",
+                     download_models: "Download the models", free_space: "Free up space" };
+let healthTimer;
+function renderHealth(h) {
+  const card = $("#health-card"), fix = $("#health-fix"), repair = h.repair || {};
+  const problems = (h.items || []).filter(i => !i.ok);
+  let msg = null, fixWhat = null;
+  if (repair.running) msg = repair.message;
+  else if (repair.finished) msg = repair.finished;
+  else if (problems.length) {
+    const first = problems.find(p => p.blocking) || problems[0];
+    const others = problems.length - 1;
+    msg = first.plain + (others ? ` There ${others === 1 ? "is 1 other thing" : `are ${others} other things`} to look at, in the log.` : "");
+    if (first.fix && first.fix !== "auto") fixWhat = first.fix;
+  }
+  fix.hidden = !fixWhat || !!repair.running;
+  if (fixWhat) { fix.textContent = FIX_LABELS[fixWhat] || "Fix it"; fix.onclick = () => runFix(fixWhat); }
+  $("#health-log").hidden = !msg;
+  card.hidden = !msg;
+  $("#health-text").textContent = msg || "";
+  clearTimeout(healthTimer);
+  healthTimer = setTimeout(() => refreshHealth(false), repair.running ? 2000 : 20000);
+}
+async function refreshHealth(fresh) {
+  try { renderHealth(await api("/api/health" + (fresh ? "/check" : ""), fresh ? { method: "POST" } : {})); }
+  catch { clearTimeout(healthTimer); healthTimer = setTimeout(() => refreshHealth(false), 20000); }
+}
+async function runFix(what) {
+  const b = $("#health-fix"); b.disabled = true;
+  try { renderHealth({ items: [], repair: (await api("/api/health/fix", { method: "POST", json: { what } })).repair }); }
+  catch (e) { toast(e.message, 7000); }
+  finally { b.disabled = false; }
+}
+$("#health-log").onclick = () => api("/api/health/open-log", { method: "POST" }).catch(e => toast(e.message));
+$("#health-btn").onclick = async () => {
+  const b = $("#health-btn"); b.disabled = true; b.textContent = "Checking...";
+  try {
+    const h = await api("/api/health/check", { method: "POST" });
+    renderHealth(h);
+    const bad = (h.items || []).filter(i => !i.ok).length;
+    const fixed = (h.items || []).filter(i => i.repaired).length;
+    if (!bad) toast(fixed ? `Put ${fixed} thing${fixed > 1 ? "s" : ""} right. Everything looks fine now.` : "Everything looks fine.", 5000);
+  } catch (e) { toast(e.message, 6000); }
+  finally { b.disabled = false; b.textContent = "Check Midify"; }
+};
+refreshHealth(false);
+
 /* ---------- updates ---------- */
 const verNum = (v) => (v || "").split(".").reduce((a, n) => a * 1000 + (parseInt(n, 10) || 0), 0);
 function renderUpdate(u) {

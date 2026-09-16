@@ -34,6 +34,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile  # n
 from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
+import health  # noqa: E402
 import pipeline  # noqa: E402
 import sources  # noqa: E402
 import updater  # noqa: E402
@@ -239,6 +240,7 @@ def start_background():
     threading.Thread(target=worker, daemon=True).start()
     threading.Thread(target=drive_sender, daemon=True).start()
     threading.Thread(target=updater.startup, daemon=True).start()
+    threading.Thread(target=check_health_at_startup, daemon=True).start()
 
 
 @app.middleware("http")
@@ -250,6 +252,20 @@ async def only_this_mac(request: Request, call_next):
     if request.method not in ("GET", "HEAD") and request.headers.get("x-clavinova") != "1":
         return JSONResponse({"error": "forbidden"}, status_code=403)
     return await call_next(request)
+
+
+HEALTH = {"last": None}
+
+
+def check_health_at_startup():
+    """Look Midify over, put right what can be put right quietly, and remember the rest."""
+    HEALTH["last"] = health.report(repair=True)
+    for item in HEALTH["last"]["items"]:
+        if item["repaired"]:
+            print(f"health: {item['plain']}", flush=True)
+    for item in HEALTH["last"]["blocking"]:
+        print(f"health: {item['plain']}", flush=True)
+        health.note(item["plain"])
 
 
 def log_error(job, exc):
@@ -283,14 +299,19 @@ def worker():
             job.status, job.stage = "cancelled", "Cancelled"
         except pipeline.UserError as e:
             job.status, job.error = "error", str(e)
+            health.note(f'"{job.title}" could not be made. {e}')
         except MemoryError as e:
             log_error(job, e)
             job.status, job.error = "error", "Your Mac ran out of memory. Close other apps, or try a shorter song."
+            health.note(f'"{job.title}" ran out of memory while being made.',
+                        "That song stopped; nothing else was affected.")
         except Exception as e:  # noqa: BLE001
             log_error(job, e)
             job.status = "error"
             job.error = (f"Something went wrong ({type(e).__name__}). Try again, or try the other "
                          f"mode. Details were saved to {ERROR_LOG}.")
+            health.note(f'"{job.title}": ' + health.describe_failure(e),
+                        f"The technical details are in {ERROR_LOG.name}. Nothing else was affected.")
         finally:
             if job.upload_path:
                 Path(job.upload_path).unlink(missing_ok=True)
@@ -603,6 +624,39 @@ def update_install():
     except updater.UpdateError as e:
         raise HTTPException(400, str(e))
     return updater.UPDATER.snapshot()
+
+
+@app.get("/api/health")
+def health_report():
+    return {**(HEALTH["last"] or health.report(repair=False)), "repair": health.REPAIRS.status()}
+
+
+@app.post("/api/health/check")
+def health_check():
+    HEALTH["last"] = health.report(repair=True)        # the safe repairs happen while checking
+    return {**HEALTH["last"], "repair": health.REPAIRS.status()}
+
+
+class FixIn(BaseModel):
+    what: str
+
+
+@app.post("/api/health/fix")
+def health_fix(body: FixIn):
+    try:
+        state = health.REPAIRS.start(body.what, on_done=lambda: HEALTH.update(last=health.report(repair=True)))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"repair": state}
+
+
+@app.post("/api/health/open-log")
+def health_open_log():
+    health.PROBLEM_LOG.parent.mkdir(parents=True, exist_ok=True)
+    if not health.PROBLEM_LOG.exists():
+        health.note("You opened the problem log. Nothing had gone wrong yet.")
+    subprocess.run(["open", "-R", str(health.PROBLEM_LOG)], timeout=10)
+    return {"ok": True}
 
 
 @app.post("/api/open-library")

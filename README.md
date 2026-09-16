@@ -100,6 +100,29 @@ the app itself uses about 0.3 GB.
 
 ## If something goes wrong
 
+Midify checks itself every time it opens, puts right what it safely can, and says the rest in
+plain English at the top of the window.
+
+| It notices | It does |
+| --- | --- |
+| Your songs folder is missing | Makes it again |
+| A song's details file is damaged | Sets it aside; the song still plays |
+| Leftover files from an interrupted song | Deletes them and says how much space that freed |
+| A saved update check that is wrong or unreadable | Throws it away and asks GitHub again |
+| The Python setup is missing or broken | Offers **Repair the setup** (about ten minutes, keeps your songs) |
+| ffmpeg or fluidsynth missing | Offers to install them, and says what still works meanwhile |
+| The AI models are gone | Offers to download them again (about 80 MB) |
+| Running out of space | Offers to free some by removing song previews |
+| The engine falls over | Starts it again by itself, up to three times |
+
+Everything that goes wrong, and everything repaired, is written as a sentence in
+`state/problems.log`. **Open the log** in the window shows it in Finder. The technical details
+stay in `state/errors.log` for debugging.
+
+**Check Midify** at the bottom of the window runs all of it on demand.
+
+### Other things
+
 - **YouTube downloads fail**: YouTube changes often. Click *Update downloader*
   at the bottom of the page. The app updates and restarts itself.
 - **"Your Mac is almost out of space"**: each song needs a few hundred MB while

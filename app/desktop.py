@@ -194,11 +194,23 @@ def serve_in_background():
     import pipeline
     import server
 
+    import health
     server.start_background()                         # queue carried over, drive sender, updates
-    config = uvicorn.Config(server.app, host="127.0.0.1", port=server.PORT, log_level="warning")
-    running = uvicorn.Server(config)
-    running.install_signal_handlers = lambda: None
-    running.run()
+    for attempt in range(1, 4):                       # if the engine ever falls over, start it again
+        try:
+            config = uvicorn.Config(server.app, host="127.0.0.1", port=server.PORT, log_level="warning")
+            running = uvicorn.Server(config)
+            running.install_signal_handlers = lambda: None
+            running.run()
+            return                                    # a normal stop: the app is quitting
+        except Exception as e:  # noqa: BLE001
+            if attempt == 3:
+                health.note(f"Midify's engine stopped three times and could not be started again ({type(e).__name__}).",
+                            "Quit Midify with Cmd+Q and open it again.")
+                raise
+            health.note(f"Midify's engine stopped unexpectedly ({type(e).__name__}).",
+                        f"Midify started it again by itself (try {attempt} of 3).")
+            time.sleep(2)
 
 
 def wait_for_server(url, seconds=90):
@@ -282,7 +294,22 @@ def start_engine(web, url):
                             "~/Library/Logs/Midify.log")
 
 
+def watch_for_crashes():
+    """Anything that falls over anywhere gets written down in plain words, rather than vanishing."""
+    import health
+
+    def on_exception(exc_type, exc, tb, thread=None):
+        where = f" in {thread.name}" if thread is not None else ""
+        health.note(f"Something unexpected went wrong{where}: {health.describe_failure(exc, doing='running')}",
+                    "Midify kept going. The technical details are in the Console log.")
+        sys.__excepthook__(exc_type, exc, tb)
+
+    sys.excepthook = on_exception
+    threading.excepthook = lambda args: on_exception(args.exc_type, args.exc_value, args.exc_traceback, args.thread)
+
+
 def main():
+    watch_for_crashes()
     # The window comes first and the engine loads behind it. Opening used to wait for the whole
     # engine before anything appeared, and a Mac that is busy (just restarted, or scanning the
     # app) turned that silence into "the application is not responding".
