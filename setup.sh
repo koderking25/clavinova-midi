@@ -29,6 +29,10 @@ say "Installing Python 3.11"
 uv python install 3.11
 
 if [ ! -x .venv/bin/python ]; then
+  if [ -e .venv ] || [ -L .venv ]; then
+    say "Clearing a broken Python environment"     # a dangling link or half-built folder blocks uv
+    rm -rf .venv
+  fi
   say "Creating the app's Python environment"
   uv venv --python 3.11 .venv
 fi

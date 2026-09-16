@@ -24,7 +24,7 @@ NAME = "Midify"
 # renaming it would force every existing install through the ten minute setup again.
 SUPPORT_NAME = "Clavinova MIDI Maker"
 APP = os.path.join(BUILD, f"{NAME}.app")
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 
 LAUNCHER = r"""#!/bin/bash
 # Starts the app: sets up the environment on first run, then opens the app's own
@@ -32,7 +32,7 @@ LAUNCHER = r"""#!/bin/bash
 set -u
 BUNDLE="$(cd "$(dirname "$0")/.." && pwd)"
 RES="$BUNDLE/Resources"
-SUPPORT="$HOME/Library/Application Support/Clavinova MIDI Maker"
+SUPPORT="${CLAVINOVA_SUPPORT:-$HOME/Library/Application Support/Clavinova MIDI Maker}"
 LOG_DIR="$HOME/Library/Logs"
 LOG="$LOG_DIR/Midify.log"
 
@@ -56,7 +56,11 @@ if [ ! -x "$VENV/bin/python" ]; then
     alert "Midify needs Homebrew for its audio tools.\n\nInstall it from https://brew.sh, then open this app again."
     exit 1
   fi
-  osascript -e 'display dialog "First time setup: this downloads the AI models and takes about ten minutes. A Terminal window will show what it is doing." buttons {"Set up now", "Later"} default button 1 with title "Clavinova MIDI Maker"' >/dev/null 2>&1 || exit 0
+  WHAT="First time setup: this downloads the AI models and takes about ten minutes."
+  if [ -e "$VENV" ] || [ -L "$VENV" ]; then       # something is there but cannot run: repair, not first run
+    WHAT="Midify needs to repair its setup: part of it is missing or was deleted. This takes about ten minutes."
+  fi
+  osascript -e "display dialog \"$WHAT A Terminal window will show what it is doing.\" buttons {\"Set up now\", \"Later\"} default button 1 with title \"Midify\"" >/dev/null 2>&1 || exit 0
   say "starting first run setup"
   osascript -e "tell application \"Terminal\" to do script \"bash '$RES/setup-app.sh'\"" >/dev/null 2>&1
   osascript -e 'tell application "Terminal" to activate' >/dev/null 2>&1
@@ -181,7 +185,7 @@ SETUP = r"""#!/bin/bash
 # One time setup for Midify: a private Python environment and the AI models.
 set -euo pipefail
 RES="$(cd "$(dirname "$0")" && pwd)"
-SUPPORT="$HOME/Library/Application Support/Clavinova MIDI Maker"
+SUPPORT="${CLAVINOVA_SUPPORT:-$HOME/Library/Application Support/Clavinova MIDI Maker}"
 VENV="$SUPPORT/venv"
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 export UV_NO_CACHE=1
@@ -203,6 +207,12 @@ done
 say "Building a private Python for the app"
 mkdir -p "$SUPPORT"
 uv python install 3.11
+# Anything at the venv path that cannot run Python is in the way: a shortcut to a folder that has
+# been deleted, or a half-built environment. uv stops with "File exists", so clear it first.
+if [ ! -x "$VENV/bin/python" ] && { [ -e "$VENV" ] || [ -L "$VENV" ]; }; then
+  say "Clearing a broken Python folder and building it again"
+  rm -rf "$VENV"
+fi
 [ -x "$VENV/bin/python" ] || uv venv --python 3.11 "$VENV"
 uv pip install --python "$VENV/bin/python" --no-deps -r "$RES/requirements.lock"
 
