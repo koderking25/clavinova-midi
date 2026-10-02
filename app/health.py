@@ -216,7 +216,18 @@ def check_downloader():
             "files still works.", "install_tools", False)
 
 
+def check_storage():
+    """Storage saver keeps everything on a flash drive, so it has to be plugged in to make songs."""
+    try:
+        import storage
+    except Exception:                                   # noqa: BLE001
+        return True, "Storage settings could not be read, so Midify is using your Mac.", None, False
+    ok, plain, fix = storage.ready()
+    return ok, plain, fix, not ok
+
+
 CHECKS = [
+    ("storage", "Where songs are kept", check_storage),
     ("python_setup", "The app's Python setup", check_python_setup),
     ("audio_tools", "Audio tools", check_audio_tools),
     ("models", "AI models", check_models),
@@ -261,7 +272,8 @@ class Repairs:
         if self.state["running"]:
             raise ValueError(f"Midify is already {self.state['message'][:1].lower()}{self.state['message'][1:]}")
         job = {"download_models": self._download_models, "free_space": self._free_space,
-               "rebuild_python": self._setup_terminal, "install_tools": self._setup_terminal}.get(what)
+               "rebuild_python": self._setup_terminal, "install_tools": self._setup_terminal,
+               "storage_standard": self._storage_standard}.get(what)
         if not job:
             raise ValueError("There is nothing to fix there.")
         self.state = {"running": what, "message": {
@@ -269,6 +281,7 @@ class Repairs:
             "free_space": "Freeing space by removing song previews.",
             "rebuild_python": "Rebuilding the app's Python setup in a Terminal window. It takes about ten minutes.",
             "install_tools": "Installing the missing audio tools in a Terminal window.",
+            "storage_standard": "Switching back to keeping songs on your Mac.",
         }[what], "finished": None}
         threading.Thread(target=self._run, args=(what, job, on_done), daemon=True).start()
         return self.status()
@@ -292,6 +305,11 @@ class Repairs:
         if not ok:
             raise RuntimeError(err or "the models did not load")
         return "The AI models are downloaded and working again."
+
+    @staticmethod
+    def _storage_standard():
+        import storage
+        return storage.switch("standard") + " Reopen Midify to use it."
 
     @staticmethod
     def _free_space():
@@ -331,6 +349,14 @@ def describe_failure(exc, doing="making a song"):
     if isinstance(exc, getattr(pipeline, "UserError", ())):
         return str(exc)
     name = type(exc).__name__
+    text = str(exc)
+    # The most likely failure with Storage saver on: the drive was pulled out mid-song. Say that,
+    # rather than a class name nobody can act on (tests/test_storage_song.py).
+    if "/Volumes/" in text and ("No such file" in text or "Errno 2" in text
+                                or "Input/output error" in text or "Errno 5" in text):
+        drive = text.split("/Volumes/", 1)[1].split("/", 1)[0] or "the flash drive"
+        return (f"The flash drive ({drive}) was unplugged while Midify was {doing}, so the song could "
+                "not be finished. Plug it back in and make it again. Songs already on the drive are fine.")
     plain = {
         "MemoryError": "Your Mac ran out of memory.",
         "FileNotFoundError": "A file Midify expected was not there.",

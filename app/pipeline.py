@@ -24,6 +24,7 @@ import numpy as np
 import soundfile as sf
 
 import drums as drumkit
+import extremes
 import midi_export as mx
 import postproc
 import sources
@@ -346,9 +347,15 @@ class Progress:
     def start(self, key, timer=True):
         if self.job.cancelled:
             raise Cancelled()
+        s = next((s for s in self.stages if s[0] == key), None)
+        if s is None:
+            # A step nobody planned a weight for (an extra listen, say). Show what it is doing and
+            # leave the progress bar where it is, rather than failing the whole song.
+            self.job.stage = key
+            self._push()
+            return
         if self.cur:
             self.done_weight += self.cur[2]
-        s = next(s for s in self.stages if s[0] == key)
         self.cur = (s[0], s[1], s[2], timer)
         self.frac = 0.0
         self.stage_t0 = time.time()
@@ -697,6 +704,23 @@ def run_transkun(x):
     return ns, pedal
 
 
+NOTED = []          # what the second listen heard, for the song's details
+
+
+def all_88(audio, notes, transcribe, prog=None, what="notes"):
+    """Fold in the very low and very high keys the listeners cannot reach straight on.
+
+    Costs nothing on songs that stay in the middle of the keyboard: the second listen only happens
+    when the first pass found notes near the edges (app/extremes.py)."""
+    def say(zone, seconds):
+        if prog:
+            prog.start(f"Listening again for the very {'low' if zone == 'low' else 'high'} notes "
+                       f"({seconds:.0f} seconds of the song)", timer=False)
+    out, said = extremes.reach_all_88(audio, SR, notes, transcribe, mx.Note, progress=say)
+    NOTED.append(f"{what}: {said}") if said else None       # kept for the song's details, not a log call
+    return out
+
+
 def run_basic_pitch(stem, path, fmin, fmax):
     # Basic Pitch mixes to mono itself before doing anything, so handing it mono 16 bit
     # feeds it the same signal for a quarter of the disk: a 4 minute stem is about 21 MB
@@ -859,6 +883,7 @@ def process(job, work_root, lib_dir, on_update):
         if job.mode == "piano":
             prog.start("notes")
             notes, pedal = run_transkun(x)
+            notes = all_88(x, notes, lambda a: run_transkun(a)[0], prog, "piano")
             parts = piano_parts(notes, pedal, job.split_hands)
         elif job.mode == "arrange":
             prog.start("separate", timer=False)
@@ -874,6 +899,7 @@ def process(job, work_root, lib_dir, on_update):
             gc.collect()
             prog.start("notes")
             notes, pedal = run_transkun(accompaniment)
+            notes = all_88(accompaniment, notes, lambda a: run_transkun(a)[0], prog, "piano")
             del accompaniment
             parts = piano_parts(notes, pedal, job.split_hands)
             parts[0].notes = parts[0].notes + melody          # the sung melody belongs to the right hand
@@ -886,6 +912,9 @@ def process(job, work_root, lib_dir, on_update):
             melody = []
             if present["vocals"]:
                 melody = postproc.mono(run_basic_pitch(stems["vocals"], work / "vocals.wav", 80, 1400))
+                melody = all_88(stems["vocals"], melody,
+                                lambda a: postproc.mono(run_basic_pitch(a, work / "vocals-again.wav", 80, 1400)),
+                                prog, "melody")
             prog.start("chords")
             chords, pedal = ([], [])
             if present["other"]:
@@ -894,7 +923,11 @@ def process(job, work_root, lib_dir, on_update):
             prog.start("bass")
             bass = []
             if present["bass"]:
-                bass = postproc.rel_vel(postproc.mono(run_basic_pitch(stems["bass"], work / "bass.wav", 30, 400)), 0.7)
+                bass = postproc.mono(run_basic_pitch(stems["bass"], work / "bass.wav", 30, 400))
+                bass = all_88(stems["bass"], bass,
+                              lambda a: postproc.mono(run_basic_pitch(a, work / "bass-again.wav", 30, 400)),
+                              prog, "bass")
+                bass = postproc.rel_vel(bass, 0.7)
             prog.start("drums")
             hits = drumkit.transcribe_drums(stems["drums"].mean(axis=1), SR, mix_rms)
             drum_notes = [mx.Note(t, t + 0.1, p, v) for t, p, v in hits]

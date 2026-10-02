@@ -43,6 +43,13 @@ import usb  # noqa: E402
 ROOT = APP.parent
 # Inside a Mac .app the code folder is read only, so the launcher points these somewhere
 # writable. Left alone they behave exactly as before.
+import storage  # noqa: E402
+
+# Storage saver keeps everything on the flash drive. This sets the folder names below, so it has to
+# happen before they are read. With the drive unplugged it falls back to the Mac, and making a song
+# is blocked separately with a clear message (app/storage.py).
+STORAGE_AT_START = storage.apply_to_process()
+
 WORK = Path(os.environ.get("CLAVINOVA_WORK", ROOT / "work"))
 UPLOADS = WORK / "uploads"
 STATE = Path(os.environ.get("CLAVINOVA_STATE", ROOT / "state"))
@@ -416,6 +423,9 @@ def _check_options(mode, melody_program):
         raise HTTPException(400, "Unknown mode.")
     if melody_program not in pipeline.MELODY_PROGRAMS:
         raise HTTPException(400, "Unknown melody instrument.")
+    stopped = storage.blocked_reason()
+    if stopped:
+        raise HTTPException(400, stopped)
 
 
 @app.post("/api/jobs")
@@ -599,6 +609,57 @@ def library_preview(name: str):
     return FileResponse(mp3, media_type="audio/mpeg")
 
 
+class PracticeIn(BaseModel):
+    kind: str
+    amount: int = 0
+
+
+@app.post("/api/library/{name}/practice")
+def make_practice(name: str, body: PracticeIn):
+    """A practice version of a song: slower, in another key, with a count-in, or easier to play.
+
+    Works on any .mid in the songs folder, including hand-made ones dropped in from BitMidi."""
+    import practice
+    src = LIB / name
+    if src.parent.resolve() != LIB.resolve() or not src.is_file() or src.suffix.lower() != ".mid":
+        raise HTTPException(404, "That song is not in your songs folder.")
+    # Names stay plain: brackets and percent signs are stripped for a piano's small screen, which
+    # would leave "Song (slow 70". A dash survives and reads properly on the instrument.
+    label = {"slow": f"slow {body.amount}", "transpose": f"{'up' if body.amount > 0 else 'down'} {abs(body.amount)}",
+             "count_in": "count-in", "simplify": "easier"}.get(body.kind)
+    if label is None:
+        raise HTTPException(400, "Unknown practice version.")
+    # Keep the label whole: names are trimmed for a piano's small screen, and losing the end turns
+    # "slow 70" into the misleading "slow 7". The song's own name gives way instead.
+    room = max(8, usb.NAME_LIMIT - len(label) - 3)
+    dest = pipeline.unique_path(LIB, usb.safe_filename(f"{src.stem[:room].strip()} - {label}"))
+    try:
+        if body.kind == "slow":
+            says = practice.slower(src, dest, body.amount or 70)
+        elif body.kind == "transpose":
+            says = practice.transpose(src, dest, body.amount)
+        elif body.kind == "count_in":
+            says = practice.count_in(src, dest, body.amount or 4)
+        else:
+            says = practice.simplify(src, dest)
+    except ValueError as e:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(400, str(e))
+    except Exception as e:                                  # noqa: BLE001
+        dest.unlink(missing_ok=True)
+        health.note(health.describe_failure(e, doing="making a practice version"))
+        raise HTTPException(400, "Midify could not make that practice version. The log says what happened.")
+    try:                                                    # carry the song's details over, so the list reads well
+        mf = META / (src.stem + ".json")
+        if mf.exists():
+            meta = json.loads(mf.read_text())
+            meta["title"] = f"{meta.get('title') or src.stem} - {label}"
+            (META / (dest.stem + ".json")).write_text(json.dumps(meta))
+    except Exception:                                       # noqa: BLE001
+        pass
+    return {"ok": True, "file": dest.name, "says": says}
+
+
 @app.post("/api/library/{name}/reveal")
 def library_reveal(name: str):
     subprocess.run(["open", "-R", str(_lib_file(name))], timeout=10)
@@ -648,6 +709,60 @@ def health_fix(body: FixIn):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"repair": state}
+
+
+class StorageIn(BaseModel):
+    mode: str
+    drive: str = None
+
+
+@app.get("/api/storage")
+def storage_state():
+    """Where everything is kept, how much it is, and which drives could hold it."""
+    ok, plain, _fix = storage.ready()
+    return {"usage": storage.usage(), "ready": ok, "says": plain,
+            "blocked": storage.blocked_reason(),
+            "drives": [d for d in usb.list_drives()],
+            "needs_gb": storage.NEED_GB,
+            "fixed_install_note": ("The app's Python environment stays on your Mac. The piano model "
+                                   "lives inside it, and a flash drive cannot hold the links and "
+                                   "programs it needs.")}
+
+
+@app.post("/api/storage/mode")
+def storage_mode(body: StorageIn):
+    """Switch between Standard and Storage saver, copying what you already have to its new home."""
+    try:
+        said = storage.switch(body.mode, body.drive)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except OSError as e:
+        health.note(f"Could not move your songs: {e}")
+        raise HTTPException(400, f"Midify could not finish moving your files: {e}")
+    health.note(said)
+    return {"ok": True, "says": said + " Reopen Midify to start using it.", "reopen": True}
+
+
+@app.post("/api/storage/free-mac")
+def storage_free_mac():
+    """Remove the Mac copies, once they are safely on the drive."""
+    try:
+        return {"ok": True, "says": storage.free_mac_copy()}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/storage/reopen")
+def storage_reopen():
+    """Quit and reopen, so the new storage choice takes effect."""
+    import shlex
+    bundle = updater.bundle_path()
+    if not bundle or updater.UPDATER.quit_hook is None:
+        return {"ok": False, "says": "Quit Midify and open it again to start using the new location."}
+    subprocess.Popen(["/bin/bash", "-c", f"sleep 2; open -n {shlex.quote(str(bundle))}"],
+                     start_new_session=True)
+    threading.Timer(0.3, updater.UPDATER.quit_hook).start()
+    return {"ok": True, "says": "Reopening Midify."}
 
 
 @app.post("/api/health/open-log")

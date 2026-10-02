@@ -36,6 +36,8 @@ h1 { font: 600 30px/1.15 ui-serif, "New York", Georgia, serif; margin: 0 0 6px; 
 main { max-width: 880px; margin: 0 auto; padding: 8px 20px 40px; display: grid; gap: 16px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow); }
 .card h2 { font: 600 13px/1.2 -apple-system, system-ui, sans-serif; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+.practice-menu { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.practice-menu .hint { width: 100%; margin: 0 0 4px; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .grow { flex: 1 1 auto; min-width: 0; }
 button, .btn { font: inherit; font-weight: 600; border: 1px solid var(--line); background: var(--card); color: var(--ink);
@@ -205,6 +207,25 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
   <section class="card" aria-labelledby="drive-h">
     <h2 id="drive-h">Flash drive</h2>
     <div id="drives"><p class="empty">Looking for flash drives...</p></div>
+  </section>
+
+  <section class="card" aria-labelledby="storage-h">
+    <h2 id="storage-h">Storage</h2>
+    <div class="opts">
+      <label><input type="radio" name="smode" value="standard" id="smode-standard"> <b>Standard</b>&nbsp; Songs and working files are kept on this Mac.</label>
+      <label><input type="radio" name="smode" value="saver" id="smode-saver"> <b>Storage saver</b>&nbsp; Everything that grows is kept on a flash drive, which has to be plugged in to make songs.</label>
+    </div>
+    <div class="row" id="storage-pick" hidden>
+      <label>Drive <select id="storage-drive" aria-label="Flash drive for Storage saver"></select></label>
+      <button class="small primary" id="storage-apply">Use this drive</button>
+    </div>
+    <p class="hint" id="storage-says"></p>
+    <div id="storage-usage" class="hint"></div>
+    <div class="row">
+      <button class="small" id="storage-free" hidden>Free up the Mac copy</button>
+      <button class="small primary" id="storage-reopen" hidden>Reopen Midify</button>
+      <button class="link" id="storage-refresh">Refresh</button>
+    </div>
   </section>
 </main>
 
@@ -495,7 +516,9 @@ function songCard(it) {
     const rm = document.createElement("button"); rm.className = "small"; rm.textContent = "Remove";
     rm.onclick = async () => { if (!confirm(`Move "${it.file}" to the Trash?`)) return;
       try { await api(`/api/library/${enc}/trash`, { method: "POST" }); if (S.justMade === it.file) S.justMade = null; toast("Moved to the Trash."); refreshLibrary(); } catch (e) { toast(e.message); } };
-    acts.append(send, dl, rv, rm); el.append(acts);
+    const pr = document.createElement("button"); pr.className = "small"; pr.textContent = "Practice version";
+    pr.onclick = () => openPractice(it, enc, el);
+    acts.append(send, pr, dl, rv, rm); el.append(acts);
     return el;
   }
 }
@@ -579,7 +602,7 @@ $("#lib-btn").addEventListener("click", () => api("/api/open-library", { method:
 initModes();
 /* ---------- is anything wrong ---------- */
 const FIX_LABELS = { rebuild_python: "Repair the setup", install_tools: "Install the tools",
-                     download_models: "Download the models", free_space: "Free up space" };
+                     download_models: "Download the models", free_space: "Free up space", storage_standard: "Keep songs on my Mac" };
 let healthTimer;
 function renderHealth(h) {
   const card = $("#health-card"), fix = $("#health-fix"), repair = h.repair || {};
@@ -624,6 +647,127 @@ $("#health-btn").onclick = async () => {
   finally { b.disabled = false; b.textContent = "Check Midify"; }
 };
 refreshHealth(false);
+
+/* ---------- practice versions: slower, another key, count-in, easier ---------- */
+const PRACTICE = [
+  { kind: "slow", amount: 70, label: "Slower (70%)", hint: "Same notes and bar lines, seven tenths of the speed." },
+  { kind: "slow", amount: 50, label: "Much slower (50%)", hint: "Half speed, for learning a hard passage." },
+  { kind: "simplify", amount: 0, label: "Easier to play", hint: "Keeps the tune, thins out the chords underneath." },
+  { kind: "count_in", amount: 4, label: "With a count-in", hint: "Four clicks before the song starts." },
+  { kind: "transpose", amount: 2, label: "Up 2 semitones", hint: "" },
+  { kind: "transpose", amount: -2, label: "Down 2 semitones", hint: "" },
+];
+
+function openPractice(it, enc, row) {
+  const open = row.querySelector(".practice-menu");
+  if (open) { open.remove(); return; }
+  const box = document.createElement("div");
+  box.className = "practice-menu";
+  const note = document.createElement("p");
+  note.className = "hint";
+  note.textContent = `A new song file is made. "${it.title || it.file}" is left exactly as it is.`;
+  box.append(note);
+  PRACTICE.forEach(opt => {
+    const b = document.createElement("button");
+    b.className = "small"; b.textContent = opt.label;
+    if (opt.hint) b.title = opt.hint;
+    b.onclick = async () => {
+      [...box.querySelectorAll("button")].forEach(x => x.disabled = true);
+      b.textContent = "Making...";
+      try {
+        const r = await api(`/api/library/${enc}/practice`, { method: "POST", json: { kind: opt.kind, amount: opt.amount } });
+        toast(r.says + " It is in your songs list now.", 7000);
+        box.remove();
+        refreshLibrary();
+      } catch (e) {
+        toast(e.message, 7000);
+        [...box.querySelectorAll("button")].forEach(x => x.disabled = false);
+        b.textContent = opt.label;
+      }
+    };
+    box.append(b);
+  });
+  row.append(box);
+}
+
+/* ---------- storage: this Mac, or everything on the flash drive ---------- */
+const gb = b => (b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : Math.round(b / 1e6) + " MB");
+let storageState = null;
+let storagePicked = null;        // what the person has chosen but not applied yet
+
+function renderStorage(st) {
+  storageState = st;
+  const u = st.usage || {};
+  const saver = u.mode === "saver";
+  $("#smode-standard").checked = storagePicked ? storagePicked === "standard" : !saver;
+  $("#smode-saver").checked = storagePicked ? storagePicked === "saver" : saver;
+  $("#storage-pick").hidden = !($("#smode-saver").checked && !saver);
+  $("#storage-free").hidden = !saver || !st.ready;
+  const sel = $("#storage-drive");
+  const usable = (st.drives || []).filter(d => d.writable);
+  sel.innerHTML = usable.length
+    ? usable.map(d => `<option value="${esc(d.path)}">${esc(d.name)} (${gb(d.free_bytes)} free${d.status === "good" ? "" : ", " + esc(d.filesystem)})</option>`).join("")
+    : `<option value="">No flash drive plugged in</option>`;
+  $("#storage-apply").disabled = !usable.length;
+  const parts = Object.entries(u.parts || {});
+  const total = u.growing_total_bytes || 0;
+  $("#storage-usage").innerHTML =
+    `<b>${saver ? "On " + esc(u.drive_name || "the drive") : "On this Mac"}: ${gb(total)}</b> &nbsp;`
+    + parts.map(([k, v]) => `${esc(k)} ${gb(v.bytes)}`).join(" &middot; ")
+    + `<br>The app itself and its Python setup take ${gb(u.fixed_install_bytes || 0)} and stay on your Mac. `
+    + esc(st.fixed_install_note || "");
+  $("#storage-says").textContent = st.blocked || st.says || "";
+}
+
+async function refreshStorage() {
+  try { renderStorage(await api("/api/storage")); } catch (e) { /* the card just stays as it was */ }
+}
+
+$("#smode-saver").onchange = () => { storagePicked = "saver"; $("#storage-pick").hidden = false; };
+$("#smode-standard").onchange = async () => {
+  storagePicked = "standard";
+  if (!storageState || storageState.usage.mode !== "saver") { $("#storage-pick").hidden = true; return; }
+  const b = $("#smode-standard");
+  b.disabled = true;
+  try {
+    const r = await api("/api/storage/mode", { method: "POST", json: { mode: "standard" } });
+    $("#storage-says").textContent = r.says;
+    $("#storage-reopen").hidden = !r.reopen;
+    storagePicked = null;
+    await refreshStorage();
+  } catch (e) { toast(e.message, 7000); await refreshStorage(); }
+  finally { b.disabled = false; }
+};
+$("#storage-apply").onclick = async () => {
+  const drive = $("#storage-drive").value;
+  if (!drive) return;
+  const b = $("#storage-apply");
+  b.disabled = true; b.textContent = "Moving...";
+  try {
+    const r = await api("/api/storage/mode", { method: "POST", json: { mode: "saver", drive } });
+    $("#storage-says").textContent = r.says;
+    $("#storage-reopen").hidden = !r.reopen;
+    storagePicked = null;
+    await refreshStorage();
+  } catch (e) { toast(e.message, 8000); await refreshStorage(); }
+  finally { b.disabled = false; b.textContent = "Use this drive"; }
+};
+$("#storage-free").onclick = async () => {
+  const b = $("#storage-free");
+  b.disabled = true;
+  try {
+    const r = await api("/api/storage/free-mac", { method: "POST" });
+    toast(r.says, 7000);
+    await refreshStorage();
+  } catch (e) { toast(e.message, 8000); }
+  finally { b.disabled = false; }
+};
+$("#storage-reopen").onclick = async () => {
+  try { const r = await api("/api/storage/reopen", { method: "POST" }); toast(r.says, 5000); }
+  catch (e) { toast(e.message, 6000); }
+};
+$("#storage-refresh").onclick = refreshStorage;
+refreshStorage();
 
 /* ---------- updates ---------- */
 const verNum = (v) => (v || "").split(".").reduce((a, n) => a * 1000 + (parseInt(n, 10) || 0), 0);

@@ -51,6 +51,16 @@ same thing from a checkout of the code.
 3. **Or drop a file**: MP3, M4A, WAV, FLAC and most other audio or video files.
 4. **Send to flash drive**: plug the drive in, click *Send to flash drive*,
    then *Eject* before unplugging.
+5. **Practice version** (on any song in the list): makes a second file to learn from.
+   It works on hand-made MIDI files dropped in from BitMidi too, and never changes
+   the original.
+
+   | Version | What it does |
+   | --- | --- |
+   | Slower (70% or 50%) | Changes the tempo only, so the notes and bar lines read exactly the same on the piano's screen |
+   | Easier to play | Keeps every note of the tune and thins the chords underneath to at most three notes, dropping faint filler notes |
+   | With a count-in | Four clicks before the song starts |
+   | Up or down 2 semitones | Moves the whole song, keeping drums where they are and nothing off the end of the keyboard |
 
 On your piano or keyboard, plug the drive into its USB port and choose the song
 from its song list.
@@ -60,6 +70,32 @@ from its song list.
 - Finished songs: `~/Music/Midify/` (previews and details are kept in a hidden
   folder next to them). A songs folder from before the rename is moved there once.
 - *Remove* moves a song to the Mac's Trash. Nothing is deleted outright.
+
+## Two ways to use space
+
+In **Storage**, choose where everything lives.
+
+| | Standard | Storage saver |
+| --- | --- | --- |
+| Songs and previews | On the Mac | On the flash drive |
+| Scratch space while a song is made (about 600 MB for five minutes) | On the Mac | On the flash drive |
+| Separation model (161 MB) | On the Mac | On the flash drive |
+| Compiled-code cache | On the Mac | On the flash drive |
+| Needs the drive plugged in | No | **Yes, to make songs** |
+
+Switching copies what you already have to its new home, checks every file arrived, and only then
+offers **Free up the Mac copy**. Reopen Midify for the change to take effect.
+
+Measured, not claimed: making a song with Storage saver on grows the Mac by **0.0 MB** in every
+place it could (`tests/test_storage_song.py`).
+
+What stays on the Mac either way is the app and its Python environment, about 900 MB. The piano
+model's weights live inside it, and a FAT32 flash drive cannot hold the links and programs it
+needs. Storage saver is about everything that grows, not the fixed install.
+
+With the drive unplugged, Midify still opens; it says which drive it wants and refuses to start a
+song until it is back. Pull the drive out mid-song and it says exactly that, and nothing already on
+the drive is harmed.
 
 ## Flash drive tips
 
@@ -84,6 +120,28 @@ Automatic transcription is not perfect. On test songs with known notes:
 
 Real recordings with reverb, singing and crowded mixes will score lower than
 these tests. Piano covers work best of all.
+
+### All 88 keys, A0 to C8
+
+The listeners hear the middle of the keyboard best. On a chromatic run of every key the piano model
+reaches 82 of 88 on its own: it misses A0 at the bottom and G#7 to C8 at the top.
+
+Midify now listens a second time to the moments where edge notes appear, with the song shifted an
+octave, so those keys land where the model hears best, and shifts the notes back. That reaches
+**88 of 88**, and every note from the first pass survives untouched.
+
+A song that stays in the middle of the keyboard pays **0.0 seconds**: the second listen only
+happens when the first pass found notes near either end, and then only for those seconds, at most
+20 per end. Measured on real four minute recordings, that is about **20% longer** for the
+note-finding step (a rock song gained 10 notes; an EDM track triggered one end only and gained
+none). An earlier version listened for up to a minute per end and doubled the time for about fifty
+notes, which was not worth it.
+
+Two cheaper tests for "does this song go that low" were tried first and both failed against
+controls, because the harmonics of ordinary notes sit in the extreme bands: a rock drum track had
+more low energy than a song actually playing A0, and a middle-of-the-keyboard run had a sharper
+tone above 2.3 kHz than a real C8. The transcription itself is the only reliable clue.
+See `tests/test_range.py`.
 
 Songs can be up to 15 minutes long. Measured on this Mac (M1, 8 GB):
 
