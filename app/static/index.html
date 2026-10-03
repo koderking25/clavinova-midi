@@ -527,6 +527,7 @@ function songCard(it) {
 function currentDrive() { return S.drives.find(d => d.path === S.drive) || null; }
 async function refreshDrives() {
   try { S.drives = await api("/api/drives"); } catch { S.drives = []; }
+  storageDrives();
   if (!currentDrive()) { const good = S.drives.find(d => d.status === "good") || S.drives[0]; S.drive = good ? good.path : null; }
   renderDrives();
 }
@@ -695,6 +696,22 @@ const gb = b => (b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : Math.round(b / 1e6) +
 let storageState = null;
 let storagePicked = null;        // what the person has chosen but not applied yet
 
+function storageDrives() {
+  // The drive list is polled every few seconds for the Flash drive section; use that same live
+  // list here. Reading it once when the app opened meant plugging a drive in afterwards was never
+  // noticed, and the button stayed dead.
+  const sel = $("#storage-drive");
+  if (!sel) return;
+  const usable = (S.drives || (storageState && storageState.drives) || []).filter(d => d.writable);
+  const chosen = sel.value;
+  sel.innerHTML = usable.length
+    ? usable.map(d => `<option value="${esc(d.path)}">${esc(d.name)} (${gb(d.free_bytes)} free${d.status === "good" ? "" : ", " + esc(d.filesystem)})</option>`).join("")
+    : `<option value="">No flash drive plugged in</option>`;
+  if (chosen && usable.some(d => d.path === chosen)) sel.value = chosen;
+  const apply = $("#storage-apply");
+  if (apply && !apply.textContent.startsWith("Moving")) apply.disabled = !usable.length;
+}
+
 function renderStorage(st) {
   storageState = st;
   const u = st.usage || {};
@@ -703,12 +720,7 @@ function renderStorage(st) {
   $("#smode-saver").checked = storagePicked ? storagePicked === "saver" : saver;
   $("#storage-pick").hidden = !($("#smode-saver").checked && !saver);
   $("#storage-free").hidden = !saver || !st.ready;
-  const sel = $("#storage-drive");
-  const usable = (st.drives || []).filter(d => d.writable);
-  sel.innerHTML = usable.length
-    ? usable.map(d => `<option value="${esc(d.path)}">${esc(d.name)} (${gb(d.free_bytes)} free${d.status === "good" ? "" : ", " + esc(d.filesystem)})</option>`).join("")
-    : `<option value="">No flash drive plugged in</option>`;
-  $("#storage-apply").disabled = !usable.length;
+  storageDrives();
   const parts = Object.entries(u.parts || {});
   const total = u.growing_total_bytes || 0;
   $("#storage-usage").innerHTML =
@@ -723,7 +735,11 @@ async function refreshStorage() {
   try { renderStorage(await api("/api/storage")); } catch (e) { /* the card just stays as it was */ }
 }
 
-$("#smode-saver").onchange = () => { storagePicked = "saver"; $("#storage-pick").hidden = false; };
+$("#smode-saver").onchange = () => {
+  storagePicked = "saver";
+  $("#storage-pick").hidden = false;
+  refreshDrives();                       // look for a drive right now, rather than up to 4 seconds later
+};
 $("#smode-standard").onchange = async () => {
   storagePicked = "standard";
   if (!storageState || storageState.usage.mode !== "saver") { $("#storage-pick").hidden = true; return; }
