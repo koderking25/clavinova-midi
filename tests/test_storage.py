@@ -150,6 +150,34 @@ def main():
     check("mode is remembered", storage.mode() == "standard")
     check("nothing is blocked in Standard", storage.blocked_reason() is None)
 
+    print("\nThe AI model goes across at half the size")
+    # The cache holds every file twice: the real file under blobs, and a link to it under
+    # snapshots. Copying both with links followed put 161 MB on the drive where 81 MB does.
+    cache = PLAY / "hf-cache"
+    model = cache / "hub" / "models--someone--SomeModel"
+    (model / "blobs").mkdir(parents=True)
+    (model / "snapshots" / "abc123").mkdir(parents=True)
+    (model / "refs").mkdir(parents=True)
+    (model / "blobs" / "deadbeef").write_bytes(b"\x7f" * 3_000_000)
+    (model / "refs" / "main").write_text("abc123")
+    link = model / "snapshots" / "abc123" / "weights.bin"
+    link.symlink_to(model / "blobs" / "deadbeef")
+    out = PLAY / "model-on-drive"
+    storage._copy_models(cache, out)
+    went = sum(f.stat().st_size for f in out.rglob("*") if f.is_file())
+    # What the old way put on the drive: every file, links followed, so the weights twice over.
+    old_way = PLAY / "model-old-way"
+    storage._copy_tree(cache, old_way)
+    both = sum(f.stat().st_size for f in old_way.rglob("*") if f.is_file())
+    check("the real file arrives, not a dangling link",
+          (out / "hub" / "models--someone--SomeModel" / "snapshots" / "abc123" / "weights.bin").stat().st_size == 3_000_000)
+    check("which revision to use comes too",
+          (out / "hub" / "models--someone--SomeModel" / "refs" / "main").read_text() == "abc123")
+    check("the duplicate copy is left behind",
+          not (out / "hub" / "models--someone--SomeModel" / "blobs").exists())
+    check("so it takes half the room on the drive", went <= both * 0.6,
+          f"{went / 1e6:.0f} MB now, {both / 1e6:.0f} MB the old way")
+
     print("\nA songs folder set on purpose is respected")
     # This went wrong once: Storage saver overrode CLAVINOVA_LIBRARY, so a test wrote its fixture
     # songs into a real songs folder. Never again.

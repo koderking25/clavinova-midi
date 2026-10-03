@@ -40,6 +40,9 @@ fi
 say "Installing the exact package versions this app was tested with"
 uv pip install --python .venv/bin/python --no-deps -r requirements.lock
 
+say "Removing parts of the install nothing here uses (about 156 MB)"
+.venv/bin/python tools/slim.py
+
 say "Downloading the AI models (about 80 MB, one time only) and checking they load"
 .venv/bin/python - <<'EOF'
 import os, sys, warnings

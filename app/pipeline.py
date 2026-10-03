@@ -28,6 +28,7 @@ import extremes
 import midi_export as mx
 import postproc
 import sources
+import timing
 import usb
 
 SR = 44100
@@ -309,26 +310,34 @@ def check_models_in_child(timeout=900):
 
 
 class Progress:
-    """Weighted stages. Stages without their own progress creep forward on a timer."""
+    """Stages with expected times, corrected by how long they really take on this Mac.
+
+    The time left is the real remainder of this step plus every step still to come, not a guess
+    from how full the bar looks. Steps the plan did not know about (a second listen for the very
+    low or very high keys) are added as they happen, so the countdown accounts for them instead of
+    stalling at the end."""
 
     def __init__(self, job, stages, on_update):
         self.job, self.on_update = job, on_update
-        self.stages = stages                                  # list of (key, label, expected_seconds)
-        self.total = sum(s[2] for s in stages) or 1.0
+        self.stages = list(stages)                            # (key, label, expected_seconds)
+        self.total = sum(s[2] for s in self.stages) or 1.0
         self.done_weight = 0.0
+        self.index = -1
         self.cur = None
         self.frac = 0.0
         self.t0 = time.time()
         self.stage_t0 = time.time()
+        self.measured = []                                    # (key, actual, expected), for next time
+        self._just_moved = False
         self._stop = threading.Event()
         self._tick = threading.Thread(target=self._ticker, daemon=True)
         self._tick.start()
 
     def _ticker(self):
         while not self._stop.wait(0.5):
-            if self.cur and self.cur[3]:                      # timer-driven stage
+            if self.cur and self.cur[3]:                      # no progress of its own: use the clock
                 est = max(self.cur[2], 0.1)
-                self.frac = max(self.frac, min(0.95, (time.time() - self.stage_t0) / est))
+                self.frac = max(self.frac, min(0.98, (time.time() - self.stage_t0) / est))
             self._push()
 
     def _push(self):
@@ -338,36 +347,83 @@ class Progress:
         # Re-planning with the real song length can shift the weights; the bar must never go backwards.
         p = max(self.job.progress, min(0.99, p))
         self.job.progress = round(p, 3)
-        elapsed = time.time() - self.t0
-        remaining_est = self.total * (1 - p)
-        speed = (elapsed / (p * self.total)) if p > 0.05 else 1.0
-        self.job.eta = round(max(0.0, remaining_est * min(3.0, max(0.5, speed))))
+
+        in_stage = time.time() - self.stage_t0
+
+        # How far off the plan this song is running so far. Measured against planned time that has
+        # actually been used, so it means something from the first step onwards.
+        planned_so_far = self.done_weight + min(in_stage, self.cur[2])
+        drift = 1.0
+        if planned_so_far > 5:
+            drift = min(2.5, max(0.5, (time.time() - self.t0) / planned_so_far))
+
+        # The step we are in is expected to take its planned time stretched by that drift. Without
+        # this, an overrunning step reads as "no time left here" the moment it passes its plan, and
+        # the countdown stays wrong for as long as the step keeps running.
+        expected_here = self.cur[2] * drift
+        left_here = max(0.0, expected_here - in_stage)
+        later = sum(st[2] for st in self.stages[self.index + 1:]) * drift
+        left = left_here + later
+
+        # Count down steadily: creep past small wobbles, but correct at once when the estimate is
+        # genuinely out, because holding on to a number that is wrong is worse than moving it.
+        before = self.job.eta
+        if before is not None and not self._just_moved and left > before:
+            if left - before <= max(5.0, before * 0.15):
+                left = before + 1
+        self._just_moved = False
+        self.job.eta = round(max(0.0, left))
         self.on_update(self.job)
+
+    def _finish_current(self):
+        if self.cur:
+            self.measured.append((self.cur[0], time.time() - self.stage_t0, self.cur[2]))
+            self.done_weight += self.cur[2]
 
     def start(self, key, timer=True):
         if self.job.cancelled:
             raise Cancelled()
-        s = next((s for s in self.stages if s[0] == key), None)
-        if s is None:
-            # A step nobody planned a weight for (an extra listen, say). Show what it is doing and
-            # leave the progress bar where it is, rather than failing the whole song.
+        found = next(((i, st) for i, st in enumerate(self.stages) if st[0] == key), None)
+        if found is None:
+            # A step nobody planned a weight for. Show what it is doing and leave the bar where it
+            # is, rather than failing the whole song.
             self.job.stage = key
             self._push()
             return
-        if self.cur:
-            self.done_weight += self.cur[2]
+        self._finish_current()
+        self.index, s = found
         self.cur = (s[0], s[1], s[2], timer)
         self.frac = 0.0
         self.stage_t0 = time.time()
         self.job.stage = s[1]
+        self._just_moved = True
         self._push()
+
+    def add_stage(self, key, label, seconds):
+        """Something extra is about to happen that the plan did not include. Make room for it."""
+        if any(st[0] == key for st in self.stages):
+            return
+        at = self.index + 1
+        self.stages.insert(at, (key, label, max(0.5, seconds * timing.correction(key))))
+        self.total = sum(st[2] for st in self.stages) or 1.0
+        self.start(key, timer=True)
 
     def set(self, frac):
         self.frac = max(self.frac, min(1.0, frac))
         self._push()
 
-    def stop(self):
+    def stop(self, record=False):
+        """Stop ticking. Only a song that finished teaches anything: a cancelled or failed one
+        would record a step that was cut short as if that were its normal speed, and every later
+        countdown would come up short."""
         self._stop.set()
+        if record:
+            self._finish_current()
+            try:
+                timing.record(self.measured)
+            except Exception:                                 # noqa: BLE001
+                pass                                          # never let bookkeeping cost a song
+        self.cur = None
 
 
 def _rms(x):
@@ -712,10 +768,15 @@ def all_88(audio, notes, transcribe, prog=None, what="notes"):
 
     Costs nothing on songs that stay in the middle of the keyboard: the second listen only happens
     when the first pass found notes near the edges (app/extremes.py)."""
+    # Shifting down stretches the audio, shifting up shortens it, so the two ends cost differently.
+    per_second = SPEED["transkun"] if what in ("piano", "chords") else SPEED["basic_pitch"]
+
     def say(zone, seconds):
         if prog:
-            prog.start(f"Listening again for the very {'low' if zone == 'low' else 'high'} notes "
-                       f"({seconds:.0f} seconds of the song)", timer=False)
+            stretched = seconds * (0.5 if zone == "low" else 2.0)
+            prog.add_stage(f"relisten-{zone}-{what}",
+                           f"Listening again for the very {'low' if zone == 'low' else 'high'} notes",
+                           stretched * per_second)
     out, said = extremes.reach_all_88(audio, SR, notes, transcribe, mx.Note, progress=say)
     NOTED.append(f"{what}: {said}") if said else None       # kept for the song's details, not a log call
     return out
@@ -790,6 +851,7 @@ def piano_parts(notes, pedal, split_hands):
 
 
 def plan_stages(job, seconds):
+    """Expected seconds per step, corrected by how long these steps really took here before."""
     s = []
     if job.source == "youtube":
         s.append(("download", "Downloading the song", 8 + seconds * 0.02))
@@ -811,7 +873,7 @@ def plan_stages(job, seconds):
         s.append(("notes", "Finding every piano note", seconds * SPEED["transkun"]))
     s += [("tempo", "Finding the tempo", 2 + seconds * 0.02),
           ("write", "Writing and checking the MIDI file", 3 + seconds * 0.03)]
-    return s
+    return [(key, label, secs * timing.correction(key)) for key, label, secs in s]
 
 
 def unique_path(folder, name):
@@ -987,6 +1049,7 @@ def process(job, work_root, lib_dir, on_update):
             "created": time.time(),
         }
         (meta_dir / (out.stem + ".json")).write_text(json.dumps(result, indent=1))
+        prog.stop(record=True)                  # finished properly: worth learning from
         return result
     finally:
         prog.stop()

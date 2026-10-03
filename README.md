@@ -89,9 +89,20 @@ offers **Free up the Mac copy**. Reopen Midify for the change to take effect.
 Measured, not claimed: making a song with Storage saver on grows the Mac by **0.0 MB** in every
 place it could (`tests/test_storage_song.py`).
 
-What stays on the Mac either way is the app and its Python environment, about 900 MB. The piano
+What stays on the Mac either way is the app and its Python environment, **752 MB**. The piano
 model's weights live inside it, and a FAT32 flash drive cannot hold the links and programs it
 needs. Storage saver is about everything that grows, not the fixed install.
+
+The install used to be 908 MB. `tools/slim.py` removes what is never used (C++ headers for
+building against torch, the PyObjC project's test suite, compiled copies the app keeps elsewhere
+anyway), and `setup.sh` runs it. Nothing sounds different: the accuracy tests score exactly the
+same. Two further candidates were tried and both broke the app, so they stay: `torch/bin` holds
+`torch_shm_manager`, which torch needs to pass audio between processes, and `torch.testing` is
+imported by torch itself on the way up.
+
+On the drive, the AI model takes **81 MB rather than 161 MB**. The cache keeps every file twice,
+a real file and a link to it, and following the links copied both; only the real contents go
+across now (checked by loading the model from a FAT32 drive: 2.6 seconds).
 
 With the drive unplugged, Midify still opens; it says which drive it wants and refuses to start a
 song until it is back. Pull the drive out mid-song and it says exactly that, and nothing already on
@@ -150,6 +161,35 @@ Songs can be up to 15 minutes long. Measured on this Mac (M1, 8 GB):
 | Solo piano recording | about 2 to 3 minutes |
 | Piano version | about 6 minutes |
 | Full band | about 5 minutes |
+
+### The time left
+
+The countdown is the real remainder: what this step has left plus every step still to come, each
+corrected by how long that step actually takes on your Mac. After every song Midify keeps how long
+each step took against what it expected, and plans the next song from the middle of recent runs.
+
+Measured on songs played out against a known clock (`tests/test_countdown.py`), typical error in
+the time remaining:
+
+| | Old way | Now |
+| --- | --- | --- |
+| A Mac as fast as the plan assumed | 0 s | 0 s |
+| A Mac twice as slow, never measured before | 69 s | 47 s |
+| The same Mac, after a few songs | 69 s | **0 s** |
+
+On real songs made on this Mac, the estimate shown the moment a song starts:
+
+| | Said at the start | Really took | Out by |
+| --- | --- | --- | --- |
+| First song, nothing measured yet | 32 s | 22 s | 10 s |
+| Second song, same length | 21 s | 22 s | **1 s** |
+
+It only ever counts down: a small wobble creeps by a second at a time, while a genuinely wrong
+estimate is corrected at once, because holding on to a wrong number is worse than moving it. Only
+a song that finishes teaches anything, since a step cut short by a cancellation would otherwise
+look fast for ever. Work
+the plan did not know about, such as a second listen for the extreme keys, is added to the
+countdown as it starts rather than appearing as a stall at the end.
 
 A song uses at most about 3.7 GB of memory while it is being made, so close
 other big apps if your Mac feels slow. Each song is made in its own process, so
