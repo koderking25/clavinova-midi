@@ -1,0 +1,26 @@
+{
+ "file": "Fracture Retest.mid",
+ "title": "Fracture Retest",
+ "mode": "piano",
+ "auto": false,
+ "auto_shares": null,
+ "bpm": 91.4,
+ "score_grid": null,
+ "seconds": 209.2,
+ "parts": [
+  {
+   "name": "Right hand",
+   "notes": 337,
+   "channel": 1
+  },
+  {
+   "name": "Left hand",
+   "notes": 260,
+   "channel": 2
+  }
+ ],
+ "notes": 597,
+ "preview": true,
+ "video_id": "hYH80WGPet8",
+ "created": 1791130395.410814
+}

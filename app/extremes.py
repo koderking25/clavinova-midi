@@ -43,28 +43,77 @@ def wanted(notes):
             "high": any(n.pitch >= HIGH_GATE for n in notes)}
 
 
-def segments(notes, zone, song_length):
-    """The moments worth hearing again: around notes that sit near the edge of the keyboard."""
-    low = zone == "low"
-    times = sorted(n.start for n in notes
-                   if (n.pitch <= LOW_GATE if low else n.pitch >= HIGH_GATE))
-    if not times:
+# Where to listen in the band, once the gate has decided it is worth listening at all.
+LOUD_BAND = {"low": (24.0, 70.0), "high": (2300.0, 5000.0)}
+
+
+def loud_moments(audio, sr, zone, most=12):
+    """The moments with the most energy at that end of the keyboard, loudest first.
+
+    Used only to choose where to listen again, never to decide whether to: that call belongs to
+    wanted(), because energy in these bands is also where ordinary notes keep their harmonics.
+    Picking a moment wrongly costs a few seconds; it cannot add a wrong note, because a note is
+    only kept when it lands in the zone and the straight pass does not already have it.
+
+    Reported by a listener who found Fracture missing its low D: the piano model heard three notes
+    near the bottom, all in one place, so the second listen looked there and nowhere else, while
+    the D1s at 14s and 3:13 went unexamined."""
+    import numpy as np
+    mono = audio.mean(axis=1) if audio.ndim > 1 else audio
+    frame, hop = 16384, sr // 4
+    if len(mono) < frame * 2:
         return []
-    spans = []
-    for t in times:
-        start, end = max(0.0, t - PAD), min(song_length, t + PAD)
-        if spans and start <= spans[-1][1]:
-            spans[-1] = (spans[-1][0], max(spans[-1][1], end))
-        else:
-            spans.append((start, end))
-    kept, total = [], 0.0
-    for start, end in spans:
+    lo, hi = LOUD_BAND[zone]
+    scores = []
+    window = np.hanning(frame)
+    for start in range(0, len(mono) - frame, hop):
+        seg = mono[start:start + frame] * window
+        spec = np.abs(np.fft.rfft(seg))
+        freqs = np.fft.rfftfreq(frame, 1 / sr)
+        band = (freqs >= lo) & (freqs <= hi)
+        scores.append((float(spec[band].sum() / (spec.sum() + 1e-9)), start / sr))
+    if not scores:
+        return []
+    scores.sort(reverse=True)
+    picked = []
+    for _score, when in scores:
+        if all(abs(when - already) > PAD * 2 for already in picked):
+            picked.append(when)
+        if len(picked) >= most:
+            break
+    return picked
+
+
+def segments(notes, zone, song_length, audio=None, sr=None):
+    """The moments worth hearing again, best first.
+
+    What the straight pass heard near the edge of the keyboard comes first, because that is the
+    model's own evidence. Then the places where that end of the keyboard is loudest in the
+    recording. Ordering matters: there is only so much extra listening allowed, and the loudest
+    moment in a song is often near the end, where a first-come ordering would never reach it."""
+    low = zone == "low"
+    ranked = [(0, n.start) for n in notes
+              if (n.pitch <= LOW_GATE if low else n.pitch >= HIGH_GATE)]
+    if audio is not None and sr:
+        ranked += [(i + 1, when) for i, when in enumerate(loud_moments(audio, sr, zone))]
+    if not ranked:
+        return []
+    ranked.sort(key=lambda pair: pair[0])
+
+    chosen, total = [], 0.0
+    for _priority, when in ranked:
         if total >= MAX_EXTRA:
             break
+        start, end = max(0.0, when - PAD), min(song_length, when + PAD)
+        if any(start < c_end and end > c_start for c_start, c_end in chosen):
+            continue                                   # already covered by a window we kept
         end = min(end, start + (MAX_EXTRA - total))
-        kept.append((start, end))
+        if end - start < 0.5:
+            continue
+        chosen.append((start, end))
         total += end - start
-    return kept
+    chosen.sort()
+    return chosen
 
 
 def shift(audio, sr, semitones):
@@ -111,7 +160,7 @@ def reach_all_88(audio, sr, base, transcribe, make, progress=None, lowest=21, hi
     for zone, semis in (("low", 12), ("high", -12)):
         if not ask[zone]:
             continue
-        spans = segments(base, zone, song_length)
+        spans = segments(base, zone, song_length, audio, sr)
         if not spans:
             continue
         if progress:

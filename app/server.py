@@ -107,7 +107,7 @@ for _d in (WORK, UPLOADS, STATE, LIB, META):
 QUEUE_FILE = STATE / "queue.json"
 SAVED_FIELDS = ("id", "title", "mode", "source", "video_id", "upload_path", "duration_hint", "melody_program",
                 "split_hands", "created", "status", "result", "send_to_drive", "drive_path", "drive_folder",
-                "drive_status", "drive_file")
+                "drive_status", "drive_file", "cancelled")
 
 
 def _saved_queue():
@@ -154,6 +154,22 @@ def save_queue():
         pass
 
 
+def _already_made(job):
+    """Did this song finish before the app closed? Then restarting it only makes a second copy.
+
+    Matched by name and by the file being newer than the job itself, so an older song of the same
+    name never counts."""
+    try:
+        stem = usb.safe_filename(job.title).removesuffix(".mid")
+        for made in LIB.glob("*.mid"):
+            if made.stem.rstrip(" 0123456789") == stem.rstrip(" 0123456789") \
+                    and made.stat().st_mtime > (job.created or 0):
+                return True
+    except Exception:                                    # noqa: BLE001
+        pass
+    return False
+
+
 def restore_queue():
     """Put back what was saved when the app last closed. A song that was being made starts again."""
     restored = 0
@@ -164,6 +180,10 @@ def restore_queue():
             continue
         if job.source == "upload" and job.status != "done" and not (job.upload_path and Path(job.upload_path).exists()):
             continue
+        if fields.get("cancelled"):
+            continue                                     # you stopped it; it does not come back
+        if job.status == "running" and _already_made(job):
+            continue                                     # it finished before the app closed
         if job.status in ("queued", "running"):
             job.status, job.stage, job.progress = "queued", "Waiting (carried on from last time)", 0.0
             with LOCK:
@@ -541,6 +561,11 @@ def cancel_job(job_id: str):
     job.cancelled = True
     if job.status == "queued":
         job.status, job.stage = "cancelled", "Cancelled"
+    elif job.status == "running":
+        # The song's own process takes a moment to notice, and inside a long step it can take a few
+        # seconds. Say so, rather than leaving the button looking like it did nothing.
+        job.stage, job.eta = "Stopping", 0
+    save_queue()            # quitting straight after cancelling must not bring the song back
     return job.public()
 
 
