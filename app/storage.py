@@ -305,8 +305,12 @@ def switch(to, drive=None, say=None, move_existing=True):
             if folder_size(src) == 0:
                 continue
             need = folder_size(src) / 1e9
-            if free_gb(Path.home()) < need + 1.0:
-                raise ValueError(f"Your Mac does not have room for {label} ({need:.1f} GB needed).")
+            # Only what the songs actually take, plus a little room to work in. Asking for a whole
+            # spare gigabyte meant a full Mac could not take 0.0 GB of songs back, which left the
+            # person stuck in Storage saver with no way out.
+            if free_gb(Path.home()) < need + 0.3:
+                raise ValueError(f"Your Mac has {free_gb(Path.home()):.1f} GB free and {label} need "
+                                 f"{need:.1f} GB. Free up a little space, then switch back.")
             say(f"Copying {label} back to your Mac")
             _copy_tree(src, dest, say)
             moved.append(label)

@@ -35,6 +35,7 @@ from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 import health  # noqa: E402
+import platform_bits  # noqa: E402
 import pipeline  # noqa: E402
 import sources  # noqa: E402
 import updater  # noqa: E402
@@ -662,7 +663,7 @@ def make_practice(name: str, body: PracticeIn):
 
 @app.post("/api/library/{name}/reveal")
 def library_reveal(name: str):
-    subprocess.run(["open", "-R", str(_lib_file(name))], timeout=10)
+    platform_bits.reveal(_lib_file(name))
     return {"ok": True}
 
 
@@ -770,13 +771,13 @@ def health_open_log():
     health.PROBLEM_LOG.parent.mkdir(parents=True, exist_ok=True)
     if not health.PROBLEM_LOG.exists():
         health.note("You opened the problem log. Nothing had gone wrong yet.")
-    subprocess.run(["open", "-R", str(health.PROBLEM_LOG)], timeout=10)
+    platform_bits.reveal(health.PROBLEM_LOG)
     return {"ok": True}
 
 
 @app.post("/api/open-library")
 def open_library():
-    subprocess.run(["open", str(LIB)], timeout=10)
+    platform_bits.open_folder(LIB)
     return {"ok": True}
 
 

@@ -1,6 +1,8 @@
 """Find USB flash drives, copy MIDI files onto them cleanly, tidy and eject."""
 import os
 import plistlib
+
+import platform_bits
 import re
 import shutil
 import subprocess
@@ -28,6 +30,20 @@ def _diskutil_info(path):
 
 def list_drives():
     drives = []
+    if platform_bits.WINDOWS:                    # Windows has drive letters, not a /Volumes folder
+        for d in platform_bits.removable_drives():
+            fs = (d["filesystem"] or "").lower()
+            if fs == "fat32":
+                status, note = "good", "FAT32: digital pianos and keyboards can read this."
+            elif fs == "exfat":
+                status, note = "warn", ("This drive is formatted exFAT, which many digital pianos and "
+                                        "keyboards cannot read. Reformat it as FAT32 if yours does not "
+                                        "see the songs.")
+            else:
+                status, note = "bad", (f"This drive is formatted {d['filesystem'] or 'unknown'}, which "
+                                       "digital pianos and keyboards cannot read. Reformat it as FAT32.")
+            drives.append({**d, "status": status, "note": note, "writable": True})
+        return drives
     if not VOLUMES.exists():
         return drives
     for vol in sorted(VOLUMES.iterdir()):

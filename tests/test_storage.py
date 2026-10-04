@@ -150,6 +150,20 @@ def main():
     check("mode is remembered", storage.mode() == "standard")
     check("nothing is blocked in Standard", storage.blocked_reason() is None)
 
+    print("\nGetting back to Standard must always be possible")
+    # A full Mac once refused to take 0.0 GB of songs back, which left the only way out of Storage
+    # saver closed.
+    real_free = storage.free_gb
+    storage.free_gb = lambda path: 0.45 if str(path).startswith(str(Path.home())) else real_free(path)
+    try:
+        said = storage.switch("standard", say=lambda m: None)
+        check("a nearly full Mac can still take its songs back", "Standard storage is on" in said, said)
+    except ValueError as e:
+        check("a nearly full Mac can still take its songs back", False, str(e))
+    finally:
+        storage.free_gb = real_free
+    storage.switch("saver", mount, say=lambda m: None)      # back to saver for the checks that follow
+
     print("\nThe AI model goes across at half the size")
     # The cache holds every file twice: the real file under blobs, and a link to it under
     # snapshots. Copying both with links followed put 161 MB on the drive where 81 MB does.
@@ -179,6 +193,9 @@ def main():
           f"{went / 1e6:.0f} MB now, {both / 1e6:.0f} MB the old way")
 
     print("\nA songs folder set on purpose is respected")
+    # Back to Standard first: an earlier check leaves Storage saver on, and in that mode the folder
+    # is meant to be the drive. This check is about what happens when nothing is overridden.
+    storage.switch("standard", say=lambda m: None)
     # This went wrong once: Storage saver overrode CLAVINOVA_LIBRARY, so a test wrote its fixture
     # songs into a real songs folder. Never again.
     import importlib

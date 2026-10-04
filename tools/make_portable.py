@@ -25,22 +25,22 @@ NEEDED_GB = 1.6
 LAUNCHER = '''#!/bin/bash
 # Midify, running from this drive. Nothing is installed on the Mac.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-export CLAVINOVA_STATE="$HERE/Midify/state"
-export CLAVINOVA_WORK="$HERE/Midify/working"
-export CLAVINOVA_LIBRARY="$HERE/Midify/Songs"
-export HF_HOME="$HERE/Midify/models"
+export CLAVINOVA_STATE="$HERE/state"
+export CLAVINOVA_WORK="$HERE/working"
+export CLAVINOVA_LIBRARY="$HERE/Songs"
+export HF_HOME="$HERE/models"
 export HF_HUB_OFFLINE=1
 export HF_HUB_DISABLE_SYMLINKS=1
-export PYTHONPYCACHEPREFIX="$HERE/Midify/compiled"
-export PATH="$HERE/Midify/tools/bin:$PATH"
+export PYTHONPYCACHEPREFIX="$HERE/compiled"
+export PATH="$HERE/tools/bin:$PATH"
 mkdir -p "$CLAVINOVA_STATE" "$CLAVINOVA_WORK" "$CLAVINOVA_LIBRARY"
-exec "$HERE/Midify/python/bin/python3.11" "$HERE/Midify/app/desktop.py"
+exec "$HERE/python/bin/python3.11" "$HERE/app/desktop.py"
 '''
 
 READ_ME = '''Midify, on this drive
 =====================
 
-Double-click "Midify.command" to open it. Midify runs from this drive: nothing is installed on
+Double-click "Midify.command" in this folder to open it. Midify runs from this drive: nothing is installed on
 the Mac, and nothing is left behind when you unplug it.
 
 Your songs are saved in Midify/Songs on this drive, so your piano can read them straight from here.
@@ -108,7 +108,20 @@ def main():
     base = Path(sys.base_prefix)
     target_python = root / "python"
     if not (target_python / "bin" / "python3.11").exists():
-        shutil.copytree(base, target_python, symlinks=True, dirs_exist_ok=True)
+        try:
+            shutil.copytree(base, target_python, symlinks=True, dirs_exist_ok=True)
+        except (OSError, shutil.Error):
+            # A FAT32 drive cannot store a link, so copy what each one points at instead.
+            shutil.rmtree(target_python, ignore_errors=True)
+            shutil.copytree(base, target_python, symlinks=False, dirs_exist_ok=True)
+    # uv marks its own Python as managed and refuses to install into it. On the drive this is our
+    # Python, not uv's, so the marker goes.
+    for marker in target_python.rglob("EXTERNALLY-MANAGED"):
+        marker.unlink()
+    # Parts of Python nothing here uses. Each file costs 32 KB on a FAT32 drive however small it
+    # is, so dropping thousands of them saves real room and real minutes of copying.
+    for unused in ("test", "idlelib", "tkinter", "turtledemo", "lib2to3", "ensurepip"):
+        shutil.rmtree(target_python / "lib" / "python3.11" / unused, ignore_errors=True)
     say(f"   {folder_mb(target_python):.0f} MB")
 
     say("\n2. The packages Midify needs")
@@ -144,14 +157,16 @@ def main():
             shutil.copytree(item, app_dir / item.name, dirs_exist_ok=True)
         else:
             shutil.copy2(item, app_dir / item.name)
-    launcher = drive / "Midify.command"
+    # Inside the Midify folder, not at the top of the drive: a piano lists everything at the top
+    # of a drive, and a .command and a .txt show up there as broken songs.
+    launcher = root / "Midify.command"
     launcher.write_text(LAUNCHER)
     launcher.chmod(0o755)
-    (drive / "Midify Read Me.txt").write_text(READ_ME % {"volume": drive.name})
+    (root / "Read Me.txt").write_text(READ_ME % {"volume": drive.name})
 
     total = folder_mb(root) + folder_mb(launcher)
     say(f"\nDone in {(time.time() - started) / 60:.0f} minutes. {total:.0f} MB on {drive.name}.")
-    say(f"Open {drive.name} in Finder and double-click Midify.command.")
+    say(f"Open {drive.name} in Finder, go into the Midify folder, and double-click Midify.command.")
     return 0
 
 

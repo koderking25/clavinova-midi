@@ -21,7 +21,11 @@ WORK = Path(os.environ.get("CLAVINOVA_WORK", HERE.parent / "work"))
 LIBRARY = Path(os.environ.get("CLAVINOVA_LIBRARY", Path.home() / "Music" / "Midify"))
 SUPPORT = Path(os.environ.get("CLAVINOVA_SUPPORT", Path.home() / "Library" / "Application Support" / "Clavinova MIDI Maker"))
 PROBLEM_LOG = STATE / "problems.log"
-MODEL_CACHE = Path.home() / ".cache" / "huggingface" / "hub" / "models--adefossez--HTDemucs"
+# Where the models actually are, which is not always the home folder: Storage saver puts them on
+# a flash drive, and a portable copy carries them with it. Asking the home folder told someone
+# their model was missing while it sat right there on the drive.
+MODEL_CACHE = (Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
+               / "hub" / "models--adefossez--HTDemucs")
 
 SONG_NEEDS_GB = 0.6                      # a song's working space, the pipeline refuses below this
 
