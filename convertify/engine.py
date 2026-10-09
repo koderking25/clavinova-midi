@@ -452,6 +452,13 @@ def _update_snapshot():
         return None
 
 
+@app.get("/api/update")
+def update_state():
+    """The current situation, asked for every few seconds by the window, exactly as Midify does.
+    Painting the banner once at startup left it sitting there long after it stopped being true."""
+    return _update_snapshot() or {"state": "unknown"}
+
+
 @app.post("/api/update/check")
 def update_check():
     import updater

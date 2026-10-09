@@ -411,10 +411,8 @@ $("#update-go").onclick = async () => {
     // both. Whatever happens, go back to the engine and show what is actually true.
     say.textContent = e.message;
     btn.disabled = false;
-    const fresh = await api("/api/update/check", { method: "POST" }).catch(() => null);
-    if (fresh && fresh.state !== "available") {
-      setTimeout(() => paintUpdate(fresh), 2500);        // let them read the message first
-    }
+    bannerBusy = Date.now() + 3000;      // keep the reason on screen, then let the poll tidy up
+    // No need to repaint by hand: the poll below notices within a few seconds and clears it.
   }
 };
 
@@ -424,8 +422,10 @@ function paintWhere() {
   $("#where-note").textContent = `Lands in ${folder.replace(/^\/Users\/[^/]+/, "~")}`;
 }
 
+let bannerBusy = 0;         // while a message is being read, leave it alone for a moment
 function paintUpdate(u) {
   const banner = $("#update-banner");
+  if (Date.now() < bannerBusy) return;
   if (!u || u.state !== "available") { banner.hidden = true; return; }
   banner.hidden = false;
   $("#update-text").textContent = u.can_install
@@ -450,4 +450,12 @@ api("/api/status").then(s => {
   paintUpdate(s.update);
 }).catch(() => {});
 refresh();
+
+// Ask about updates every few seconds, the way Midify does. This is what makes the banner go away
+// on its own: before, it was painted once when the window opened and then never corrected.
+async function refreshUpdate() {
+  try { paintUpdate(await api("/api/update")); } catch {}
+}
+refreshUpdate();
+setInterval(refreshUpdate, 3000);
 </script>

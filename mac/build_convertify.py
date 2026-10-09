@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "mac" / "build"
 NAME = "Convertify"
-VERSION = "1.1.3"
+VERSION = "1.1.4"
 BUNDLE_ID = "com.koderking25.convertify"
 APP = OUT / f"{NAME}.app"
 # updater.py belongs here too: without it the app imported nothing for updates and every check
