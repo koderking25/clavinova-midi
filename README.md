@@ -43,15 +43,20 @@ same thing from a checkout of the code.
    - In the piano modes you can put each hand on its own part (right hand on
      channel 1, left hand on channel 2), so you can turn one hand off on your
      piano and play it yourself.
-2. **Find a song**: type the name and artist. Adding "piano" finds piano
+2. **Find a song**: type the name and artist, **or paste a YouTube address**. Any shape works:
+   `youtube.com/watch?v=...`, `youtu.be/...`, a Shorts or live link, or one with a timestamp or
+   playlist on the end. Pasting a link skips searching and goes straight to that recording. Adding "piano" finds piano
    covers, which give the cleanest results. If BitMidi already has a hand-made
    MIDI of the song, it is listed first with a link. Those are usually better
    than any automatic version: download it there, then drop the .mid file on
    the app to send it to your flash drive.
 3. **Or drop a file**: MP3, M4A, WAV, FLAC and most other audio or video files.
-4. **Send to flash drive**: plug the drive in, click *Send to flash drive*,
+4. **Only make part of a long recording**: tick *Only make the first N minutes*. Midify stops
+   there and fades the last few seconds out, so it does not end mid-bar with the pedal down. This
+   is also how to use a recording longer than 15 minutes, which is otherwise refused.
+5. **Send to flash drive**: plug the drive in, click *Send to flash drive*,
    then *Eject* before unplugging.
-5. **Practice version** (on any song in the list): makes a second file to learn from.
+6. **Practice version** (on any song in the list): makes a second file to learn from.
    It works on hand-made MIDI files dropped in from BitMidi too, and never changes
    the original.
 

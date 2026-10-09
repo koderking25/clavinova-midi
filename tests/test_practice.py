@@ -185,7 +185,10 @@ def main():
           mido.MidiFile(PLAY / "flat-count-in.mid").type == 0)
 
     print("\nOn a real song from your songs folder (read only)")
-    real = sorted((Path.home() / "Music" / "Midify").glob("*.mid"))
+    # Skip the hidden "._" files macOS leaves beside real ones: they are not MIDI files, and the
+    # app's own song list skips them too.
+    real = sorted(f for f in (Path.home() / "Music" / "Midify").glob("*.mid")
+                  if not f.name.startswith("."))
     if not real:
         print("  (no songs in the folder, skipping)")
     else:

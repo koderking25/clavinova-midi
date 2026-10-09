@@ -73,6 +73,7 @@ class Job:
     video_id: str = None
     upload_path: str = None
     duration_hint: float = None
+    limit_seconds: float = None          # make only the first part of a long recording
     melody_program: int = 73
     split_hands: bool = True
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
@@ -161,6 +162,7 @@ MODELS_CHECKED = threading.Event()
 # app down, and Cancel can stop a song at once.
 
 JOB_FIELDS = ("id", "title", "mode", "source", "video_id", "upload_path", "duration_hint",
+              "limit_seconds",
               "melody_program", "split_hands", "send_to_drive")
 CANCEL_GRACE_S = 3
 
@@ -430,12 +432,13 @@ def _rms(x):
     return float(np.sqrt(np.mean(np.square(x, dtype=np.float64)))) if x.size else 0.0
 
 
-def decode_audio(src, dst):
+def decode_audio(src, dst, seconds=None):
     # 16 bit rather than 32 bit float halves the biggest temporary file: 11 MB a minute
     # instead of 21. The audio is normalised straight after this, and 16 bit carries far
     # more range than any of the models can hear, but the accuracy tests are what decide.
     cmd = [FFMPEG, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
-           "-vn", "-sn", "-dn", "-ac", "2", "-ar", str(SR), "-t", str(MAX_SECONDS), "-c:a", "pcm_s16le", str(dst)]
+           "-vn", "-sn", "-dn", "-ac", "2", "-ar", str(SR),
+           "-t", str(min(MAX_SECONDS, seconds) if seconds else MAX_SECONDS), "-c:a", "pcm_s16le", str(dst)]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
     except subprocess.TimeoutExpired:
@@ -904,6 +907,8 @@ def process(job, work_root, lib_dir, on_update):
             f"several GB, because macOS keeps memory on the disk.")
 
     seconds = float(job.duration_hint or 240)
+    if job.limit_seconds:
+        seconds = min(seconds, float(job.limit_seconds))
     prog = Progress(job, plan_stages(job, seconds), on_update)
     try:
         if job.source == "youtube":
@@ -922,7 +927,7 @@ def process(job, work_root, lib_dir, on_update):
             src = Path(job.upload_path)
 
         prog.start("decode")
-        x = decode_audio(src, work / "audio.wav")
+        x = decode_audio(src, work / "audio.wav", job.limit_seconds)
         seconds = len(x) / SR
         prog.stages = plan_stages(job, seconds)                 # re-plan with the real length
         prog.total = sum(s[2] for s in prog.stages)
@@ -1016,6 +1021,15 @@ def process(job, work_root, lib_dir, on_update):
         beats, per_bar, downbeat = plan if plan else (None, 4, 0)
         if plan:
             bpm = mx.TimeGrid(bpm, beats, downbeat, per_bar).first_bpm()
+        if job.limit_seconds:
+            # Only as much of the recording as was asked for, taken down over the last few seconds
+            # so it does not stop mid-bar with the pedal still down. This has to come after the bar
+            # lines are worked out, because that step moves notes slightly, and a note moved past
+            # the end is exactly what this is here to prevent.
+            ends_at = min(float(job.limit_seconds), len(x) / SR)
+            for part in parts:
+                part.notes, part.pedal = postproc.fade_out(part.notes, part.pedal, ends_at)
+
         del x
         gc.collect()
 

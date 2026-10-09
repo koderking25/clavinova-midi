@@ -81,6 +81,68 @@ def _is_rate_limit(msg):
     return "429" in m or "too many requests" in m or "rate-limit" in m or "rate limit" in m
 
 
+# Every shape a YouTube link comes in, including the ones with a timestamp or a playlist stuck on
+# the end. Anything that is already a bare id is accepted as it is.
+# Exactly eleven characters and no more: "hYH80WGPet8x" is not a video id with a spare letter, it
+# is not a video id. Without the guard at the end, the first eleven characters of anything matched.
+_ID = r"(?P<id>[A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])"
+YOUTUBE_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+LINK_SHAPES = [
+    re.compile(r"[?&]v=" + _ID),                                  # youtube.com/watch?v=ID
+    re.compile(r"youtu\.be/" + _ID),                              # youtu.be/ID
+    re.compile(r"/(?:shorts|live|embed|v)/" + _ID),               # shorts, live, embeds
+    re.compile(r"^" + _ID + r"$"),                                # someone pasted just the id
+]
+
+
+def youtube_id(text):
+    """The video id inside whatever was pasted, or None if there is not one.
+
+    Deliberately strict about length: an eleven character id is the only thing YouTube uses, so
+    anything else is a playlist, a channel, or a mistake."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    if "://" in lowered or lowered.startswith("www."):
+        host = lowered.split("://", 1)[-1].split("/", 1)[0].split("@")[-1].split(":")[0]
+        if not any(host == h or host.endswith("." + h) for h in YOUTUBE_HOSTS):
+            return None                                   # some other site that happens to use ?v=
+    for shape in LINK_SHAPES:
+        found = shape.search(text)
+        if found:
+            return found.group("id")
+    return None
+
+
+def looks_like_link(text):
+    """Did they paste a link rather than type a song name?"""
+    text = (text or "").strip().lower()
+    return text.startswith(("http://", "https://", "www.", "youtu.be/", "youtube.com", "m.youtube.com",
+                            "music.youtube.com"))
+
+
+def video_info(link_or_id):
+    """Title and length for one video, so a pasted link can be shown before it is made."""
+    video_id = youtube_id(link_or_id)
+    if not video_id:
+        raise ValueError("That does not look like a YouTube link. Copy the address from the "
+                         "browser's address bar, or from Share then Copy link.")
+
+    def run():
+        PACER.wait("youtube")
+        opts = {"quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": 20}
+        import yt_dlp
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        seconds = info.get("duration")
+        return {"id": video_id, "title": (info.get("title") or "Song")[:150],
+                "duration": seconds, "channel": info.get("uploader") or "",
+                "too_long": bool(seconds and seconds > MAX_SONG_SECONDS)}
+
+    return _cached(("ytinfo", video_id), run)
+
+
 def search_youtube(query, n=8):
     def run():
         PACER.wait("youtube")

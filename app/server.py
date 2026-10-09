@@ -107,7 +107,7 @@ for _d in (WORK, UPLOADS, STATE, LIB, META):
 QUEUE_FILE = STATE / "queue.json"
 SAVED_FIELDS = ("id", "title", "mode", "source", "video_id", "upload_path", "duration_hint", "melody_program",
                 "split_hands", "created", "status", "result", "send_to_drive", "drive_path", "drive_folder",
-                "drive_status", "drive_file", "cancelled")
+                "drive_status", "drive_file", "cancelled", "limit_seconds")
 
 
 def _saved_queue():
@@ -423,9 +423,11 @@ def search_bitmidi(q: str):
 
 
 class YTJob(BaseModel):
-    video_id: str
-    title: str
+    video_id: str = ""
+    link: str | None = None              # a pasted address works as well as a search result
+    title: str = ""
     duration: float | None = None
+    limit_seconds: float | None = None   # make only the first part of a long recording
     mode: str = "arrange"
     melody_program: int = 73
     split_hands: bool = True
@@ -437,6 +439,19 @@ class YTJob(BaseModel):
 def _clean_folder(name):
     name = (name or "").strip()
     return usb.safe_filename(name, ext="") if name else None
+
+
+def _check_limit(seconds):
+    """How much of a recording to make. None means all of it."""
+    if seconds in (None, "", 0):
+        return None
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "That length does not look like a number.")
+    if seconds < 30:
+        raise HTTPException(400, "Make at least 30 seconds of it.")
+    return min(seconds, float(sources.MAX_SONG_SECONDS))
 
 
 def _check_options(mode, melody_program):
@@ -451,16 +466,36 @@ def _check_options(mode, melody_program):
 
 @app.post("/api/jobs")
 def create_job(req: YTJob):
-    if not re.fullmatch(r"[A-Za-z0-9_-]{11}", req.video_id):
-        raise HTTPException(400, "That does not look like a YouTube video.")
+    video_id = req.video_id if re.fullmatch(r"[A-Za-z0-9_-]{11}", req.video_id or "") \
+        else sources.youtube_id(req.link or req.video_id or "")
+    if not video_id:
+        raise HTTPException(400, "That does not look like a YouTube video. Paste the address from "
+                                 "the browser, or search for the song by name.")
     _check_options(req.mode, req.melody_program)
-    if req.duration and req.duration > sources.MAX_SONG_SECONDS:
-        raise HTTPException(400, "That video is longer than 15 minutes. Pick a shorter one.")
-    job = pipeline.Job(title=req.title.strip()[:150] or "Song", mode=req.mode, source="youtube",
-                       video_id=req.video_id, duration_hint=req.duration,
+    limit = _check_limit(req.limit_seconds)
+    if req.duration and req.duration > sources.MAX_SONG_SECONDS and not limit:
+        longest = int(sources.MAX_SONG_SECONDS // 60)
+        raise HTTPException(400, f"That recording is {int(req.duration // 60)} minutes long, and "
+                                 f"Midify makes up to {longest}. Choose how much of it to make, "
+                                 "and it will stop there.")
+    job = pipeline.Job(title=(req.title or "").strip()[:150] or "Song", mode=req.mode, source="youtube",
+                       video_id=video_id, duration_hint=req.duration, limit_seconds=limit,
                        melody_program=req.melody_program, split_hands=req.split_hands,
                        send_to_drive=req.send_to_drive, drive_path=req.drive_path, drive_folder=_clean_folder(req.drive_folder))
     return add_job(job)
+
+
+@app.get("/api/youtube/link")
+def youtube_link(url: str):
+    """What is at this address, so a pasted link can be shown before anything is made."""
+    try:
+        return sources.video_info(url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except sources.SlowDown:
+        raise HTTPException(429, "YouTube is asking Midify to slow down. Try again in a minute.")
+    except Exception as e:                                   # noqa: BLE001
+        raise HTTPException(400, sources.friendly_download_error(str(e)))
 
 
 def _probe_seconds(path):
@@ -475,7 +510,7 @@ def _probe_seconds(path):
 @app.post("/api/upload")
 async def upload(file: UploadFile = File(...), mode: str = Form("arrange"), melody_program: int = Form(73),
                  split_hands: bool = Form(True), send_to_drive: bool = Form(False), drive_path: str = Form(""),
-                 drive_folder: str = Form("")):
+                 drive_folder: str = Form(""), limit_seconds: float = Form(0)):
     _check_options(mode, melody_program)
     name = Path(file.filename or "song").name
     stem, ext = Path(name).stem, Path(name).suffix.lower()
@@ -518,7 +553,8 @@ async def upload(file: UploadFile = File(...), mode: str = Form("arrange"), melo
         dest.unlink(missing_ok=True)
         raise HTTPException(400, "That file is empty.")
     job = pipeline.Job(title=stem[:150] or "Song", mode=mode, source="upload", upload_path=str(dest),
-                       duration_hint=_probe_seconds(dest), melody_program=melody_program, split_hands=split_hands,
+                       duration_hint=_probe_seconds(dest), limit_seconds=_check_limit(limit_seconds),
+                       melody_program=melody_program, split_hands=split_hands,
                        send_to_drive=send_to_drive, drive_path=drive_path or None, drive_folder=_clean_folder(drive_folder))
     return add_job(job)
 

@@ -151,6 +151,12 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
       <label class="mode"><input type="radio" name="mode" value="piano"><b>Solo piano recording</b><span>The most accurate. Use it when the recording is only a piano, like a piano cover or a classical piece.</span></label>
       <label class="mode"><input type="radio" name="mode" value="band"><b>Full band</b><span>Melody, chords, bass and drums each get their own part. More experimental.</span></label>
     </div>
+    <div class="opts" id="opt-length">
+      <label><input type="checkbox" id="limit-on"> Only make the first
+        <input type="number" id="limit-mins" value="5" min="1" max="15" step="1" style="width:4.5em"
+               aria-label="How many minutes to make"> minutes</label>
+      <span class="hint" id="limit-note" style="display:block;margin-top:4px">For long recordings. It fades out at the end instead of stopping mid-bar.</span>
+    </div>
     <div class="opts" id="opt-split"><label><input type="checkbox" id="split"> Put the left and right hand on separate parts, so you can turn one off on your piano and play it yourself</label></div>
     <div class="opts" id="opt-melody" hidden><label>Melody instrument <select id="melody"></select></label></div>
   </section>
@@ -169,7 +175,7 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
   <section class="card" aria-labelledby="find-h">
     <h2 id="find-h">2. Find a song</h2>
     <form class="row" id="search-form" autocomplete="off">
-      <div class="grow"><input type="search" id="q" placeholder="Song name and artist, like: Clair de Lune Debussy piano" aria-label="Song name"></div>
+      <div class="grow"><input type="search" id="q" placeholder="Song name and artist, or paste a YouTube link" aria-label="Song name or YouTube link"></div>
       <button class="primary" id="search-btn">Search</button>
     </form>
     <p class="hint">Tip: adding the word "piano" finds piano covers, which turn into the cleanest MIDI files.</p>
@@ -306,6 +312,7 @@ $("#search-form").addEventListener("submit", async e => {
   e.preventDefault();
   const q = $("#q").value.trim(); if (q.length < 2) { $("#q").focus(); return; }
   const token = ++S.searchToken;
+  if (looksLikeLink(q)) { await showPastedLink(q, token); return; }
   const btn = $("#search-btn"); btn.disabled = true; btn.textContent = "Searching...";
   $("#results").innerHTML = `<div id="bm-box"></div><div id="yt-box"><p class="empty">Searching YouTube...</p></div>`;
   const enc = encodeURIComponent(q);
@@ -314,6 +321,30 @@ $("#search-form").addEventListener("submit", async e => {
   catch (err) { if (token === S.searchToken) $("#yt-box").innerHTML = `<div class="msg bad">${esc(err.message)}</div>`; }
   finally { if (token === S.searchToken) { btn.disabled = false; btn.textContent = "Search"; } }
 });
+const looksLikeLink = t => /^(https?:\/\/|www\.|youtu\.be\/|(m\.|music\.)?youtube\.com)/i.test(t.trim());
+
+// How much of the recording to make, in seconds, or nothing for all of it.
+function limitSeconds() {
+  if (!$("#limit-on") || !$("#limit-on").checked) return null;
+  const mins = Math.max(1, Math.min(15, Number($("#limit-mins").value) || 5));
+  return Math.round(mins * 60);
+}
+
+async function showPastedLink(link, token) {
+  const btn = $("#search-btn");
+  btn.disabled = true; btn.textContent = "Looking...";
+  $("#results").innerHTML = `<div id="yt-box"><p class="empty">Reading that link...</p></div>`;
+  try {
+    const v = await api(`/api/youtube/link?url=${encodeURIComponent(link)}`);
+    if (token !== S.searchToken) return;
+    renderYouTube({ results: [v], error: null, pasted: true });
+  } catch (err) {
+    if (token === S.searchToken) $("#yt-box").innerHTML = `<div class="msg bad">${esc(err.message)}</div>`;
+  } finally {
+    if (token === S.searchToken) { btn.disabled = false; btn.textContent = "Search"; }
+  }
+}
+
 function renderBitmidi(d) {
   const box = $("#bm-box"); if (!box || !d.results.length) return;
   box.className = "bitmidi"; box.style.marginTop = "14px";
@@ -322,6 +353,7 @@ function renderBitmidi(d) {
     <p class="hint" style="margin-top:6px">Download it on BitMidi, then drop the .mid file below to send it to your flash drive.</p>`;
 }
 function renderYouTube(d) {
+  S.lastYouTube = d;                      // so changing the length can redraw these
   const box = $("#yt-box"); if (!box) return; box.innerHTML = "";
   if (d.error) box.innerHTML = `<div class="msg warn">${esc(d.error)}</div>`;
   const list = document.createElement("div"); list.className = "results";
@@ -333,11 +365,11 @@ function renderYouTube(d) {
     const el = document.createElement("div"); el.className = "res";
     el.innerHTML = `<img src="${esc(v.thumb)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
       <div style="min-width:0"><div class="t">${esc(v.title)}</div><div class="meta">${esc(v.channel)}${v.duration ? " · " + fmtDur(v.duration) : ""}${v.too_long ? " · too long (15 min max)" : ""}</div></div>`;
-    const b = document.createElement("button"); b.className = "primary"; b.textContent = "Make MIDI"; b.disabled = v.too_long;
+    const b = document.createElement("button"); b.className = "primary"; b.textContent = "Make MIDI"; b.disabled = v.too_long && !limitSeconds();
     b.addEventListener("click", async () => {
       b.disabled = true;
       try {
-        await api("/api/jobs", { method: "POST", json: { video_id: v.id, title: v.title, duration: v.duration, mode: S.mode, melody_program: +S.melody, split_hands: !!S.split, ...batchFields() } });
+        await api("/api/jobs", { method: "POST", json: { video_id: v.id, title: v.title, duration: v.duration, limit_seconds: limitSeconds(), mode: S.mode, melody_program: +S.melody, split_hands: !!S.split, ...batchFields() } });
         b.textContent = "Added"; toast(`Making "${v.title}". This takes a few minutes.`); refreshJobs(true);
       } catch (err) { b.disabled = false; toast(err.message, 6000); }
     });
@@ -371,6 +403,7 @@ function uploadFile(file, left = 0) { return new Promise(resolve => {
   const fd = new FormData();
   fd.append("file", file); fd.append("mode", S.mode); fd.append("melody_program", S.melody); fd.append("split_hands", S.split ? "true" : "false");
   const b = batchFields(); fd.append("send_to_drive", b.send_to_drive ? "true" : "false"); fd.append("drive_path", b.drive_path || ""); fd.append("drive_folder", b.drive_folder);
+  fd.append("limit_seconds", String(limitSeconds() || 0));
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/upload"); xhr.setRequestHeader("x-clavinova", "1");
   toast(`Uploading "${file.name}"...`, 60000);
@@ -783,6 +816,27 @@ $("#storage-reopen").onclick = async () => {
   catch (e) { toast(e.message, 6000); }
 };
 $("#storage-refresh").onclick = refreshStorage;
+// The length control: remembered between songs, and the results redraw when it changes, because a
+// recording that is too long on its own becomes fine once a length is chosen.
+(function () {
+  const on = $("#limit-on"), mins = $("#limit-mins"), note = $("#limit-note");
+  if (!on) return;
+  on.checked = store.get("limit-on", false);
+  mins.value = store.get("limit-mins", 5);
+  const paint = () => {
+    mins.disabled = !on.checked;
+    note.textContent = on.checked
+      ? `Only the first ${mins.value} minute${Number(mins.value) === 1 ? "" : "s"} is made, fading out at the end.`
+      : "For long recordings. It fades out at the end instead of stopping mid-bar.";
+    store.set("limit-on", on.checked);
+    store.set("limit-mins", Number(mins.value) || 5);
+    if (S.lastYouTube) renderYouTube(S.lastYouTube);
+  };
+  on.addEventListener("change", paint);
+  mins.addEventListener("input", paint);
+  paint();
+})();
+
 refreshStorage();
 
 /* ---------- updates ---------- */
