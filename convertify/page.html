@@ -2,6 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Convertify</title>
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="%232ebe7e"/><stop offset="1" stop-color="%230a5f3c"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="url(%23g)"/><g fill="%23f0fdf5"><rect x="14" y="22" width="5" height="12" rx="2.5"/><rect x="22" y="17" width="5" height="22" rx="2.5"/><rect x="37" y="18" width="5" height="21" rx="2.5"/><rect x="45" y="23" width="5" height="11" rx="2.5"/><rect x="29.5" y="13" width="5" height="25" rx="2.5"/><path d="M24 37 L40 37 L32 51 Z"/></g></svg>'>
 <style>
   /* Midify's cousin: same bones, greener, louder, and rather more pleased with itself. */
   :root {
@@ -21,7 +22,6 @@
   body { margin: 0; background: var(--bg); color: var(--ink);
          font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
 
-  .topwave { height: 40px; width: 100%; display: block; }
   main { max-width: 820px; margin: 0 auto; padding: 18px 20px 70px; display: grid; gap: 16px; }
   header h1 { font-size: 30px; margin: 0; letter-spacing: -.025em; }
   header h1 .dot { color: var(--accent); }
@@ -85,7 +85,6 @@
   @media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
 </style>
 
-<canvas class="topwave" id="topwave" aria-hidden="true"></canvas>
 <main>
   <header>
     <h1>Convertify<span class="dot">.</span></h1>
@@ -192,8 +191,8 @@ let S = { kind: store.get("kind", "mp3"), status: null, jobs: [], results: [] };
 
 /* ---------- the mesmerising bit: a wave that flows while it works ---------- */
 const viz = $("#viz"), vctx = viz.getContext("2d");
-// Not "top": a browser window already has one, and redeclaring it stops the whole script.
-const topWave = $("#topwave"), tctx = topWave.getContext("2d");
+// There used to be a strip of green dots across the top. It was decoration, it was busy, and
+// it earned nothing, so it is gone. The wave that matters is the one that moves while it works.
 let phase = 0, shown = 0, target = 0, busy = false;
 
 function paintWave(canvas, ctx, { height, bars, progress, lively }) {
@@ -227,7 +226,6 @@ function tick() {
   shown += (target - shown) * 0.08;
   phase += busy ? 0.075 : 0.012;
   paintWave(viz, vctx, { height: 92, bars: 54, progress: shown, lively: busy });
-  paintWave(topWave, tctx, { height: 40, bars: 90, progress: 1, lively: busy });
   requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
@@ -398,11 +396,26 @@ $("#check-update").onclick = async () => {
     const u = await api("/api/update/check", { method: "POST" });
     paintUpdate(u);
     b.textContent = u && u.state === "available" ? "Update ready" : "Up to date ✅";
+    setTimeout(() => { b.textContent = "Check for updates"; }, 4000);
   } catch (e) { b.textContent = "Check for updates"; }
 };
 $("#update-go").onclick = async () => {
-  $("#update-text").textContent = "Updating… hold tight. 🚀";
-  await api("/api/update/install", { method: "POST" }).catch(() => {});
+  const say = $("#update-text"), btn = $("#update-go");
+  btn.disabled = true;
+  say.textContent = "Updating… hold tight. 🚀";
+  try {
+    await api("/api/update/install", { method: "POST" });
+    say.textContent = "Downloading the new one. Convertify will close and come back. 🚀";
+  } catch (e) {
+    // It said there was an update and then said there was not, and the banner stayed up saying
+    // both. Whatever happens, go back to the engine and show what is actually true.
+    say.textContent = e.message;
+    btn.disabled = false;
+    const fresh = await api("/api/update/check", { method: "POST" }).catch(() => null);
+    if (fresh && fresh.state !== "available") {
+      setTimeout(() => paintUpdate(fresh), 2500);        // let them read the message first
+    }
+  }
 };
 
 function paintWhere() {
@@ -415,7 +428,10 @@ function paintUpdate(u) {
   const banner = $("#update-banner");
   if (!u || u.state !== "available") { banner.hidden = true; return; }
   banner.hidden = false;
-  $("#update-text").textContent = `Convertify ${u.latest} is out, and it is better than this one. 🎉`;
+  $("#update-text").textContent = u.can_install
+    ? `Convertify ${u.latest} is out, and it is better than this one. 🎉`
+    : `Convertify ${u.latest} is out. This copy cannot update itself: open it from Applications. 🧳`;
+  $("#update-go").hidden = !u.can_install;
 }
 
 api("/api/status").then(s => {

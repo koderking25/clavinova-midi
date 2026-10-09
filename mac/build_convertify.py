@@ -17,10 +17,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "mac" / "build"
 NAME = "Convertify"
-VERSION = "1.1.0"
+VERSION = "1.1.3"
 BUNDLE_ID = "com.koderking25.convertify"
 APP = OUT / f"{NAME}.app"
-SHARED = ("sources.py", "downloader.py", "usb.py", "platform_bits.py")
+# updater.py belongs here too: without it the app imported nothing for updates and every check
+# died with ModuleNotFoundError, which is what "Updating, hold tight" was really doing. It needs
+# only the standard library, so copying the file is all it takes.
+SHARED = ("sources.py", "downloader.py", "usb.py", "platform_bits.py", "updater.py")
 
 LAUNCHER = r"""#!/bin/bash
 # Opens Convertify. The first run builds a small Python environment; after that it starts at once.
@@ -107,6 +110,12 @@ def main():
     (res / "convertify" / "__init__.py").write_text("")
     (res / "requirements.txt").write_text(REQUIREMENTS)
 
+    icon = ROOT / "mac" / "convertify.icns"
+    if not icon.exists():
+        print("  drawing the icon first")
+        subprocess.run([sys.executable, str(ROOT / "mac" / "make_convertify_icon.py")], check=True)
+    shutil.copy2(icon, res / "icon.icns")
+
     print("  bundling ffmpeg, so a Mac with nothing installed can still make an MP3")
     sys.path.insert(0, str(ROOT / "tools"))
     import bundle_tools
@@ -126,6 +135,7 @@ def main():
         "CFBundleVersion": VERSION,
         "CFBundleShortVersionString": VERSION,
         "CFBundleExecutable": NAME,
+        "CFBundleIconFile": "icon",
         "CFBundlePackageType": "APPL",
         "LSMinimumSystemVersion": "12.0",
         "LSRequiresNativeExecution": True,            # never start under Rosetta
@@ -135,6 +145,13 @@ def main():
     }
     with open(APP / "Contents" / "Info.plist", "wb") as f:
         plistlib.dump(plist, f)
+
+    # Check the bundle can import everything it needs, before it is signed and shipped.
+    missing = [m for m in ("sources", "downloader", "usb", "platform_bits", "updater")
+               if not (res / "app" / f"{m}.py").exists()]
+    if missing:
+        print(f"  these would be missing at runtime: {', '.join(missing)}")
+        return 1
 
     run("codesign", "--force", "--deep", "--sign", "-", str(APP))
     checked = run("codesign", "--verify", "--verbose=1", str(APP))

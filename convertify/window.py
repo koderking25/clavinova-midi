@@ -85,6 +85,18 @@ def main():
     app.setDelegate_(delegate)
     build_menu(app)
 
+    # An update works by quitting and letting a small script swap the app, so the updater needs a
+    # way to quit from the main thread. Without this, "Update now" could never do anything, which
+    # is exactly how it behaved.
+    try:
+        import updater
+        from PyObjCTools import AppHelper as _Helper
+        updater.UPDATER.quit_hook = lambda: _Helper.callAfter(app.terminate_, None)
+        threading.Thread(target=updater.startup, daemon=True).start()
+        threading.Thread(target=updater.watch_for_updates, daemon=True).start()
+    except Exception:                                     # noqa: BLE001
+        pass                                              # updates are a convenience, not a condition
+
     screen = NSScreen.mainScreen().visibleFrame()
     width = min(START_SIZE[0], screen.size.width - 80)
     height = min(START_SIZE[1], screen.size.height - 80)

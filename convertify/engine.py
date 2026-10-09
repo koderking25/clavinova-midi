@@ -461,6 +461,13 @@ def update_check():
 @app.post("/api/update/install")
 def update_install():
     import updater
+    snap = updater.UPDATER.snapshot()
+    if not snap.get("can_install"):
+        raise HTTPException(400, "This copy cannot update itself. Open Convertify from your "
+                                 "Applications folder, or download the new one from the releases "
+                                 "page.")
+    if snap.get("state") != "available":
+        raise HTTPException(400, "Convertify is already the newest one. ✅")
     return updater.UPDATER.install()
 
 
