@@ -73,8 +73,16 @@ def main():
           with_length(concert) is None)
     check("and refused when the whole thing is being asked for",
           without(concert) is not None)
-    check("an eight hour stream is refused either way",
+    check("a four hour concert still works when taking five minutes",
+          with_length({**concert, "duration": 4 * 3600}) is None,
+          "the whole file is fetched, about 230 MB, roughly half a minute")
+    check("and exactly four hours is not an awkward edge",
+          with_length({**concert, "duration": 4 * 3600}) is None
+          and with_length({**concert, "duration": 4 * 3600 + 1}) is not None)
+    check("an eight hour stream is refused, because half a gigabyte for five minutes is not worth it",
           with_length({**concert, "duration": 8 * 3600}) is not None)
+    check("and the refusal says how long is allowed",
+          "4 hours" in sources.friendly_download_error("video too long or not downloadable"))
     # Asking YouTube for only part of a file sounds right and is fifty times slower: it streams
     # through ffmpeg, which gets throttled. Measured on a 26 minute concert: the whole 25 MB file
     # took 3 seconds, five minutes of it took 155. Fetch it all, cut it when it is read.

@@ -25,10 +25,15 @@ UA = "Midify/1.0 (personal, one request per search)"
 MIN_GAP = {"youtube": 2.0, "bitmidi": 3.0}
 COOLDOWN_S = {"youtube": 30 * 60, "bitmidi": 60 * 60}
 MAX_SONG_SECONDS = 15 * 60
-# How long a recording may be when only part of it is being made. The whole file is
-# downloaded and then cut, which is quick, but there is no sense fetching an eight hour
-# stream to make five minutes of it.
-LONGEST_TO_FETCH = 2 * 60 * 60
+# How long a recording may be when only part of it is being made. The whole file is downloaded
+# and then cut, so the question is how big that file is: about 58 MB an hour for YouTube audio,
+# which at the 10 MB/s measured on a real download is six seconds an hour. Four hours is about
+# 230 MB and half a minute, which is reasonable for taking five minutes out of a long concert or
+# a live set. Beyond that it is a sleep video or a stream, and fetching half a gigabyte to use
+# five minutes of it is not.
+LONGEST_TO_FETCH = 4 * 60 * 60
+BIGGEST_FILE = 300 * 1024 * 1024          # normally
+BIGGEST_FILE_WHEN_TRIMMING = 600 * 1024 * 1024
 
 
 class SlowDown(Exception):
@@ -245,8 +250,10 @@ def friendly_download_error(msg):
                 "the page.")
     if "too long or not downloadable" in m or "does not pass filter" in m:
         longest = int(MAX_SONG_SECONDS // 60)
+        hours = int(LONGEST_TO_FETCH // 3600)
         return (f"That recording is longer than {longest} minutes, so Midify will not make all of "
-                "it. Tick 'Only make the first few minutes' above the search box, then try again.")
+                "it. Tick 'Only make the first few minutes' above the search box, then try again. "
+                f"That works for recordings up to {hours} hours long.")
     if "max_filesize" in m or "larger than max" in m:
         return "That file is too big. Pick a shorter video."
     if "timed out" in m or "urlopen error" in m or "network" in m or "connection" in m:
@@ -274,7 +281,9 @@ def duration_filter(seconds=None):
     Normally fifteen minutes. When only part of a recording is being made, up to two hours, because
     the file is fetched whole and cut afterwards."""
     longest = LONGEST_TO_FETCH if seconds else MAX_SONG_SECONDS
-    return f"duration < {longest} & !is_live"
+    # Less than or equal, so a recording of exactly four hours is allowed. With "<" it was
+    # refused while the message promised recordings "up to 4 hours".
+    return f"duration <= {longest} & !is_live"
 
 
 def download_youtube_audio(video_id, dest_dir, on_progress=None, cancel=None, seconds=None):
@@ -300,7 +309,7 @@ def download_youtube_audio(video_id, dest_dir, on_progress=None, cancel=None, se
         "quiet": True,
         "no_warnings": True,
         "progress_hooks": [hook],
-        "max_filesize": 300 * 1024 * 1024,
+        "max_filesize": BIGGEST_FILE_WHEN_TRIMMING if seconds else BIGGEST_FILE,
         "retries": 3,
         "fragment_retries": 3,
         "socket_timeout": 30,
