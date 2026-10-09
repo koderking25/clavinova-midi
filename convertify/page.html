@@ -1,0 +1,194 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Convertify</title>
+<style>
+  /* Same family as Midify, its own colour: a link in, an MP3 out. */
+  :root {
+    --bg: #f2f4f1; --card: #fbfdfa; --ink: #19201b; --muted: #5f6b61; --line: #d9e2d8;
+    --accent: #1f6b4a; --accent-soft: #dfeee6; --accent-ink: #ffffff;
+    --ok: #2d6a39; --warn: #8a5d00; --bad: #a3261c; --bad-soft: #f8e0dc;
+    --radius: 14px; --shadow: 0 1px 2px rgba(20,40,25,.06), 0 4px 16px rgba(20,40,25,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121613; --card: #1b211d; --ink: #e9f0e9; --muted: #9aa89d; --line: #30392f;
+      --accent: #63c195; --accent-soft: #1b3129; --accent-ink: #0c1711;
+      --ok: #7fc98c; --warn: #e5b85a; --bad: #f08a7e; --bad-soft: #3b201d; --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wave { height: 26px; border-bottom: 1px solid var(--line); background:
+    repeating-linear-gradient(90deg, var(--accent) 0 2px, transparent 2px 9px); opacity: .35; }
+  main { max-width: 760px; margin: 0 auto; padding: 26px 20px 60px; display: grid; gap: 18px; }
+  h1 { font-size: 26px; margin: 0; letter-spacing: -.02em; }
+  .lead { color: var(--muted); margin: 6px 0 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+          padding: 18px 20px; box-shadow: var(--shadow); }
+  h2 { font: 600 12px/1.2 -apple-system, system-ui, sans-serif; text-transform: uppercase;
+       letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  input[type=text] { flex: 1 1 320px; min-width: 0; padding: 11px 13px; border: 1px solid var(--line);
+                     border-radius: 9px; background: var(--bg); color: var(--ink); font-size: 15px; }
+  input[type=text]:focus-visible, button:focus-visible, select:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; }
+  select { padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px;
+           background: var(--bg); color: var(--ink); font-size: 14px; }
+  button { font: inherit; padding: 10px 16px; border-radius: 9px; border: 1px solid var(--line);
+           background: var(--card); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button.small { padding: 6px 11px; font-size: 13px; }
+  button:disabled { opacity: .55; cursor: default; }
+  .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  .job { border-top: 1px solid var(--line); padding: 13px 0; display: grid; gap: 7px; }
+  .job:first-child { border-top: 0; padding-top: 2px; }
+  .job .top { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
+  .name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .bar { height: 7px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .bar span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s ease; }
+  .msg { padding: 10px 12px; border-radius: 9px; font-size: 14px; }
+  .msg.bad { background: var(--bad-soft); color: var(--bad); }
+  .empty { color: var(--muted); margin: 0; }
+  footer { max-width: 760px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 13px;
+           display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  footer button { background: none; border: 0; color: var(--muted); text-decoration: underline;
+                  cursor: pointer; padding: 0; font-size: 13px; }
+  @media (prefers-reduced-motion: reduce) { .bar span { transition: none; } }
+</style>
+
+<div class="wave"></div>
+<main>
+  <header>
+    <h1>Convertify</h1>
+    <p class="lead">Paste a YouTube link, get an MP3. It runs on this Mac, over your own connection,
+      and the finished file is shown to you in Finder.</p>
+  </header>
+
+  <section class="card">
+    <h2>1. The link</h2>
+    <div class="row">
+      <input type="text" id="link" placeholder="https://www.youtube.com/watch?v=..." aria-label="YouTube link"
+             autocomplete="off" spellcheck="false">
+      <label class="meta">Quality
+        <select id="quality" aria-label="Sound quality">
+          <option value="320">320 kbps, best</option>
+          <option value="256">256 kbps</option>
+          <option value="192">192 kbps</option>
+          <option value="128">128 kbps, smallest</option>
+        </select>
+      </label>
+      <button class="primary" id="go">Convert</button>
+    </div>
+    <p class="hint" id="hint">Shorts, music links and links with a time or playlist on the end all work.</p>
+  </section>
+
+  <section class="card" id="list-card" hidden>
+    <h2>Conversions</h2>
+    <div id="list"></div>
+  </section>
+</main>
+<footer>
+  <span id="where"></span>
+  <button id="open-folder">Open the folder</button>
+  <span id="dl"></span>
+</footer>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function api(path, opts = {}) {
+  const o = { ...opts, headers: { ...(opts.headers || {}) } };
+  if (o.method && o.method !== "GET") o.headers["x-convertify"] = "1";
+  if (o.json !== undefined) { o.body = JSON.stringify(o.json); o.headers["content-type"] = "application/json"; delete o.json; }
+  let r;
+  try { r = await fetch(path, o); } catch { throw new Error("Convertify stopped. Open it again."); }
+  let data = null; try { data = await r.json(); } catch {}
+  if (!r.ok) throw new Error((data && (data.detail || data.error)) || "Something went wrong.");
+  return data;
+}
+
+const mmss = s => s == null ? "" : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+
+function render(jobs) {
+  const card = $("#list-card"), list = $("#list");
+  card.hidden = !jobs.length;
+  list.innerHTML = "";
+  for (const j of jobs) {
+    const el = document.createElement("div");
+    el.className = "job";
+    const done = j.status === "done";
+    const busy = j.status === "downloading" || j.status === "converting" || j.status === "queued";
+    el.innerHTML = `<div class="top">
+        <span class="name">${esc(j.title || j.link)}</span>
+        <span class="meta">${esc(j.quality)} kbps${j.seconds ? " &middot; " + mmss(j.seconds) : ""}</span>
+      </div>
+      <div class="meta">${esc(done ? "Saved as " + j.file : j.stage)}</div>`;
+    if (busy) {
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      bar.innerHTML = `<span style="width:${Math.round((j.progress || 0) * 100)}%"></span>`;
+      el.append(bar);
+      const stop = document.createElement("button");
+      stop.className = "small"; stop.textContent = "Cancel";
+      stop.onclick = () => api(`/api/jobs/${j.id}/cancel`, { method: "POST" }).then(refresh);
+      el.append(stop);
+    }
+    if (j.error) {
+      const bad = document.createElement("div");
+      bad.className = "msg bad"; bad.textContent = j.error;
+      el.append(bad);
+    }
+    if (done) {
+      const show = document.createElement("button");
+      show.className = "small"; show.textContent = "Show in Finder";
+      show.onclick = () => api("/api/reveal", { method: "POST", json: { file: j.file } })
+        .catch(e => alert(e.message));
+      el.append(show);
+    }
+    list.append(el);
+  }
+}
+
+let timer;
+async function refresh() {
+  clearTimeout(timer);
+  try {
+    const jobs = await api("/api/jobs");
+    render(jobs);
+    const working = jobs.some(j => ["queued", "downloading", "converting"].includes(j.status));
+    timer = setTimeout(refresh, working ? 700 : 3000);
+  } catch {
+    timer = setTimeout(refresh, 3000);
+  }
+}
+
+$("#go").onclick = async () => {
+  const link = $("#link").value.trim();
+  if (!link) { $("#link").focus(); return; }
+  const b = $("#go");
+  b.disabled = true; b.textContent = "Starting...";
+  try {
+    await api("/api/convert", { method: "POST", json: { link, quality: $("#quality").value } });
+    $("#link").value = "";
+    $("#hint").textContent = "Converting. The folder opens with your file picked out when it is done.";
+    refresh();
+  } catch (e) {
+    $("#hint").textContent = e.message;
+  } finally {
+    b.disabled = false; b.textContent = "Convert";
+  }
+};
+$("#link").addEventListener("keydown", e => { if (e.key === "Enter") $("#go").click(); });
+$("#open-folder").onclick = () => api("/api/open-folder", { method: "POST" }).catch(() => {});
+
+api("/api/status").then(s => {
+  $("#where").textContent = `Saves to ${s.save_to}`;
+  $("#dl").textContent = `Downloader ${s.downloader}`;
+}).catch(() => {});
+refresh();
+</script>

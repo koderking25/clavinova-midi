@@ -337,6 +337,33 @@ To rebuild the app and its disk image after changing the code:
 `build_dmg.py` mounts the finished image and refuses to finish unless the app, the
 Applications shortcut, the window layout and the background are all inside.
 
+## Convertify
+
+A second app in this repository: paste a YouTube link, get an MP3. Same family as Midify, and
+deliberately separate from it.
+
+```bash
+.venv/bin/python mac/build_convertify.py
+```
+
+It shares the one part that needs constant attention, `app/sources.py` and `app/downloader.py`,
+so the downloader keeps itself current as YouTube changes, exactly as Midify's does. It shares
+nothing else: no models, no transcription. Midify's environment is 750 MB, Convertify's is 65.
+
+ffmpeg travels inside the bundle (`tools/bundle_tools.py`), so it works on a Mac with nothing
+installed. The first run builds its own small Python environment, fetching uv if that is missing
+too. Finished files go to `~/Music/Convertify` and are shown to you in Finder, already picked out.
+
+**Its releases are marked pre-release on purpose.** Midify's updater asks GitHub for the latest
+release and expects `Midify.dmg` in it; a normal Convertify release would become "latest", contain
+no such file, and Midify would quietly believe it was up to date for ever. GitHub's latest ignores
+pre-releases, so this keeps them apart. The better fix, when there is time, is either its own
+repository or teaching the updater to pick the newest release that actually contains its own file.
+
+A website cannot do this. A browser is not allowed to fetch YouTube's media, so a hosted version
+would mean one server doing every download, which gets blocked quickly and is a different thing
+legally. Both apps keep every download on the machine of whoever asked for it.
+
 ## The browser version (no install, nothing uploaded)
 
 `web/` holds a version that runs entirely in a browser tab. It produces the same
