@@ -268,6 +268,15 @@ def _is_permanent(message):
     return any(bad in low for bad in PERMANENT_FAILURES)
 
 
+def duration_filter(seconds=None):
+    """What lengths the downloader will accept.
+
+    Normally fifteen minutes. When only part of a recording is being made, up to two hours, because
+    the file is fetched whole and cut afterwards."""
+    longest = LONGEST_TO_FETCH if seconds else MAX_SONG_SECONDS
+    return f"duration < {longest} & !is_live"
+
+
 def download_youtube_audio(video_id, dest_dir, on_progress=None, cancel=None, seconds=None):
     """Download one video's audio into dest_dir. Returns the file path.
 
@@ -295,9 +304,7 @@ def download_youtube_audio(video_id, dest_dir, on_progress=None, cancel=None, se
         "retries": 3,
         "fragment_retries": 3,
         "socket_timeout": 30,
-        "match_filter": yt_dlp.utils.match_filter_func(
-            f"duration < {LONGEST_TO_FETCH} & !is_live" if seconds
-            else f"duration < {MAX_SONG_SECONDS} & !is_live"),
+        "match_filter": yt_dlp.utils.match_filter_func(duration_filter(seconds)),
     }
     # Deliberately not asking for only the wanted part. Downloading a range makes yt-dlp stream the
     # audio through ffmpeg, and YouTube throttles that savagely: measured on a 26 minute concert,

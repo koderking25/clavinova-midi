@@ -63,8 +63,18 @@ def main():
     takes = inspect.signature(sources.download_youtube_audio).parameters
     check("the downloader is told how much is wanted", "seconds" in takes, ", ".join(takes))
     source = inspect.getsource(sources.download_youtube_audio)
-    check("a long recording is allowed when only part of it is being made",
-          '"!is_live" if seconds' in source)
+    # Ask the real rule what it would do with his 26 minute concert, rather than reading the code
+    # and hoping: an earlier version of this check tested for a line of source that had moved.
+    import yt_dlp
+    concert = {"duration": 26 * 60 + 2, "is_live": False, "title": "Koln Concert", "_type": "video"}
+    with_length = yt_dlp.utils.match_filter_func(sources.duration_filter(300))
+    without = yt_dlp.utils.match_filter_func(sources.duration_filter(None))
+    check("a 26 minute recording is allowed when 5 minutes is being made",
+          with_length(concert) is None)
+    check("and refused when the whole thing is being asked for",
+          without(concert) is not None)
+    check("an eight hour stream is refused either way",
+          with_length({**concert, "duration": 8 * 3600}) is not None)
     # Asking YouTube for only part of a file sounds right and is fifty times slower: it streams
     # through ffmpeg, which gets throttled. Measured on a 26 minute concert: the whole 25 MB file
     # took 3 seconds, five minutes of it took 155. Fetch it all, cut it when it is read.
