@@ -25,6 +25,10 @@ UA = "Midify/1.0 (personal, one request per search)"
 MIN_GAP = {"youtube": 2.0, "bitmidi": 3.0}
 COOLDOWN_S = {"youtube": 30 * 60, "bitmidi": 60 * 60}
 MAX_SONG_SECONDS = 15 * 60
+# How long a recording may be when only part of it is being made. The whole file is
+# downloaded and then cut, which is quick, but there is no sense fetching an eight hour
+# stream to make five minutes of it.
+LONGEST_TO_FETCH = 2 * 60 * 60
 
 
 class SlowDown(Exception):
@@ -292,17 +296,13 @@ def download_youtube_audio(video_id, dest_dir, on_progress=None, cancel=None, se
         "fragment_retries": 3,
         "socket_timeout": 30,
         "match_filter": yt_dlp.utils.match_filter_func(
-            "!is_live" if seconds else f"duration < {MAX_SONG_SECONDS} & !is_live"),
+            f"duration < {LONGEST_TO_FETCH} & !is_live" if seconds
+            else f"duration < {MAX_SONG_SECONDS} & !is_live"),
     }
-    if seconds:
-        # Fetch only the part being made, with a few seconds spare so the fade has something to
-        # work with. Without this, the whole concert comes down the wire to make five minutes of it.
-        wanted = float(seconds) + 10
-        try:
-            opts["download_ranges"] = yt_dlp.utils.download_range_func(None, [(0, wanted)])
-            opts["force_keyframes_at_cuts"] = True
-        except AttributeError:
-            pass                                         # an older downloader: fetch it all instead
+    # Deliberately not asking for only the wanted part. Downloading a range makes yt-dlp stream the
+    # audio through ffmpeg, and YouTube throttles that savagely: measured on a 26 minute concert,
+    # five minutes took 155 seconds at 31 KB/s, while the whole 25 MB file took 3 seconds at
+    # 10 MB/s. The file is small either way, so fetch it quickly and cut it when it is read.
     url = f"https://www.youtube.com/watch?v={urllib.parse.quote(video_id)}"
     # YouTube hands out media addresses that sometimes refuse the very next request with a 403.
     # yt-dlp's own retries re-request the same address, which stays refused, so the whole download

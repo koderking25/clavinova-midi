@@ -65,7 +65,12 @@ def main():
     source = inspect.getsource(sources.download_youtube_audio)
     check("a long recording is allowed when only part of it is being made",
           '"!is_live" if seconds' in source)
-    check("and only that part is fetched", "download_ranges" in source)
+    # Asking YouTube for only part of a file sounds right and is fifty times slower: it streams
+    # through ffmpeg, which gets throttled. Measured on a 26 minute concert: the whole 25 MB file
+    # took 3 seconds, five minutes of it took 155. Fetch it all, cut it when it is read.
+    check("it does not ask for a range, which is far slower", "download_ranges" not in source)
+    check("the length is applied when the audio is read instead",
+          "seconds" in inspect.signature(pipeline.decode_audio).parameters)
     says = sources.friendly_download_error("video too long or not downloadable")
     check("a long one with no length chosen says what to do",
           "Only make the first" in says, says[:95])
