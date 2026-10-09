@@ -153,8 +153,15 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
     </div>
     <div class="opts" id="opt-length">
       <label><input type="checkbox" id="limit-on"> Only make the first
-        <input type="number" id="limit-mins" value="5" min="1" max="15" step="1" style="width:4.5em"
+        <input type="text" id="limit-mins" value="5" list="limit-choices" inputmode="numeric"
+               autocomplete="off" spellcheck="false" style="width:4.2em"
                aria-label="How many minutes to make"> minutes</label>
+      <datalist id="limit-choices">
+        <option value="1"></option><option value="2"></option><option value="3"></option>
+        <option value="4"></option><option value="5"></option><option value="6"></option>
+        <option value="7"></option><option value="8"></option><option value="10"></option>
+        <option value="12"></option><option value="15"></option>
+      </datalist>
       <span class="hint" id="limit-note" style="display:block;margin-top:4px">For long recordings. It fades out at the end instead of stopping mid-bar.</span>
     </div>
     <div class="opts" id="opt-split"><label><input type="checkbox" id="split"> Put the left and right hand on separate parts, so you can turn one off on your piano and play it yourself</label></div>
@@ -326,8 +333,9 @@ const looksLikeLink = t => /^(https?:\/\/|www\.|youtu\.be\/|(m\.|music\.)?youtub
 // How much of the recording to make, in seconds, or nothing for all of it.
 function limitSeconds() {
   if (!$("#limit-on") || !$("#limit-on").checked) return null;
-  const mins = Math.max(1, Math.min(15, Number($("#limit-mins").value) || 5));
-  return Math.round(mins * 60);
+  const asked = parseInt(String($("#limit-mins").value).replace(/[^0-9]/g, ""), 10);
+  const mins = Number.isFinite(asked) ? Math.max(1, Math.min(15, asked)) : 5;
+  return mins * 60;
 }
 
 async function showPastedLink(link, token) {
@@ -823,17 +831,23 @@ $("#storage-refresh").onclick = refreshStorage;
   if (!on) return;
   on.checked = store.get("limit-on", false);
   mins.value = store.get("limit-mins", 5);
+  const tidyMinutes = () => {
+    const asked = parseInt(String(mins.value).replace(/[^0-9]/g, ""), 10);
+    return Number.isFinite(asked) ? Math.max(1, Math.min(15, asked)) : 5;
+  };
   const paint = () => {
     mins.disabled = !on.checked;
     note.textContent = on.checked
-      ? `Only the first ${mins.value} minute${Number(mins.value) === 1 ? "" : "s"} is made, fading out at the end.`
+      ? `Only the first ${tidyMinutes()} minute${tidyMinutes() === 1 ? "" : "s"} is made, fading out at the end.`
       : "For long recordings. It fades out at the end instead of stopping mid-bar.";
     store.set("limit-on", on.checked);
-    store.set("limit-mins", Number(mins.value) || 5);
+    store.set("limit-mins", tidyMinutes());
     if (S.lastYouTube) renderYouTube(S.lastYouTube);
   };
   on.addEventListener("change", paint);
   mins.addEventListener("input", paint);
+  mins.addEventListener("change", () => { mins.value = tidyMinutes(); paint(); });
+  mins.addEventListener("blur", () => { mins.value = tidyMinutes(); paint(); });
   paint();
 })();
 
