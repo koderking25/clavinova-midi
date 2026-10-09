@@ -82,6 +82,11 @@
                   cursor: pointer; padding: 0; font-size: 13px; }
   .banner { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 13px;
             padding: 12px 15px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  /* The browser's own rule for the hidden attribute is display:none, but any rule of ours that
+     sets display beats it, so .banner's display:flex made the update banner impossible to hide:
+     banner.hidden = true set the property and the banner stayed on screen anyway. Midify has had
+     this line from the start, which is why its banner always cleared and this one never did. */
+  [hidden] { display: none !important; }
   @media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
 </style>
 
