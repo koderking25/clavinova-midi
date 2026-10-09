@@ -239,6 +239,10 @@ def friendly_download_error(msg):
         return ("YouTube refused the download three times. This is usually temporary: wait a minute "
                 "and try again. If it keeps happening, click 'Update downloader' at the bottom of "
                 "the page.")
+    if "too long or not downloadable" in m or "does not pass filter" in m:
+        longest = int(MAX_SONG_SECONDS // 60)
+        return (f"That recording is longer than {longest} minutes, so Midify will not make all of "
+                "it. Tick 'Only make the first few minutes' above the search box, then try again.")
     if "max_filesize" in m or "larger than max" in m:
         return "That file is too big. Pick a shorter video."
     if "timed out" in m or "urlopen error" in m or "network" in m or "connection" in m:
@@ -260,8 +264,12 @@ def _is_permanent(message):
     return any(bad in low for bad in PERMANENT_FAILURES)
 
 
-def download_youtube_audio(video_id, dest_dir, on_progress=None, cancel=None):
-    """Download one video's audio into dest_dir. Returns the file path."""
+def download_youtube_audio(video_id, dest_dir, on_progress=None, cancel=None, seconds=None):
+    """Download one video's audio into dest_dir. Returns the file path.
+
+    `seconds` is how much of it is wanted. When it is given, two things change: a recording longer
+    than Midify's usual limit is allowed, because only part of it is being made, and only that part
+    is fetched. Five minutes of a twenty six minute concert is a fifth of the download."""
     dest_dir = Path(dest_dir)
 
     def hook(d):
@@ -283,8 +291,18 @@ def download_youtube_audio(video_id, dest_dir, on_progress=None, cancel=None):
         "retries": 3,
         "fragment_retries": 3,
         "socket_timeout": 30,
-        "match_filter": yt_dlp.utils.match_filter_func(f"duration < {MAX_SONG_SECONDS} & !is_live"),
+        "match_filter": yt_dlp.utils.match_filter_func(
+            "!is_live" if seconds else f"duration < {MAX_SONG_SECONDS} & !is_live"),
     }
+    if seconds:
+        # Fetch only the part being made, with a few seconds spare so the fade has something to
+        # work with. Without this, the whole concert comes down the wire to make five minutes of it.
+        wanted = float(seconds) + 10
+        try:
+            opts["download_ranges"] = yt_dlp.utils.download_range_func(None, [(0, wanted)])
+            opts["force_keyframes_at_cuts"] = True
+        except AttributeError:
+            pass                                         # an older downloader: fetch it all instead
     url = f"https://www.youtube.com/watch?v={urllib.parse.quote(video_id)}"
     # YouTube hands out media addresses that sometimes refuse the very next request with a 403.
     # yt-dlp's own retries re-request the same address, which stays refused, so the whole download
@@ -311,5 +329,5 @@ def download_youtube_audio(video_id, dest_dir, on_progress=None, cancel=None):
             time.sleep(2 + attempt * 3)
     files = [p for p in dest_dir.glob("source.*") if not p.name.endswith((".part", ".ytdl"))]
     if not files:
-        raise RuntimeError("video too long or not downloadable")
+        raise RuntimeError("video too long or not downloadable")   # see friendly_download_error
     return max(files, key=lambda p: p.stat().st_size)

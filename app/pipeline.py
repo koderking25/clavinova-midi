@@ -915,7 +915,7 @@ def process(job, work_root, lib_dir, on_update):
         if job.source == "youtube":
             prog.start("download", timer=False)
             try:
-                src = sources.download_youtube_audio(job.video_id, work, on_progress=prog.set, cancel=lambda: job.cancelled)
+                src = sources.download_youtube_audio(job.video_id, work, on_progress=prog.set, cancel=lambda: job.cancelled, seconds=job.limit_seconds)
             except Cancelled:
                 raise
             except sources.SlowDown as e:

@@ -56,6 +56,20 @@ def main():
     still = [t for t in refused if sources.youtube_id(t)]
     check("things that are not a video are refused", not still, "accepted: " + ", ".join(still) if still else "")
 
+    print("\nA recording longer than the limit")
+    # The bug this covers: choosing a length let the job start, then the downloader refused the
+    # recording anyway for being over fifteen minutes, and said "try a different result".
+    import inspect
+    takes = inspect.signature(sources.download_youtube_audio).parameters
+    check("the downloader is told how much is wanted", "seconds" in takes, ", ".join(takes))
+    source = inspect.getsource(sources.download_youtube_audio)
+    check("a long recording is allowed when only part of it is being made",
+          '"!is_live" if seconds' in source)
+    check("and only that part is fetched", "download_ranges" in source)
+    says = sources.friendly_download_error("video too long or not downloadable")
+    check("a long one with no length chosen says what to do",
+          "Only make the first" in says, says[:95])
+
     print("\nHow much of it to make")
     import server
     check("no length asked for means all of it", server._check_limit(None) is None)
