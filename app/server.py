@@ -108,7 +108,7 @@ for _d in (WORK, UPLOADS, STATE, LIB, META):
 QUEUE_FILE = STATE / "queue.json"
 SAVED_FIELDS = ("id", "title", "mode", "source", "video_id", "upload_path", "duration_hint", "melody_program",
                 "split_hands", "created", "status", "result", "send_to_drive", "drive_path", "drive_folder",
-                "drive_status", "drive_file", "cancelled", "limit_seconds")
+                "drive_status", "drive_file", "cancelled", "limit_seconds", "listen_twice")
 
 
 def _saved_queue():
@@ -459,6 +459,7 @@ class YTJob(BaseModel):
     title: str = ""
     duration: float | None = None
     limit_seconds: float | None = None   # make only the first part of a long recording
+    listen_twice: bool = False           # a second pass for notes the model drops between chunks
     mode: str = "arrange"
     melody_program: int = 73
     split_hands: bool = True
@@ -511,6 +512,7 @@ def create_job(req: YTJob):
                                  "and it will stop there.")
     job = pipeline.Job(title=(req.title or "").strip()[:150] or "Song", mode=req.mode, source="youtube",
                        video_id=video_id, duration_hint=req.duration, limit_seconds=limit,
+                       listen_twice=bool(req.listen_twice),
                        melody_program=req.melody_program, split_hands=req.split_hands,
                        send_to_drive=req.send_to_drive, drive_path=req.drive_path, drive_folder=_clean_folder(req.drive_folder))
     return add_job(job)
@@ -541,7 +543,8 @@ def _probe_seconds(path):
 @app.post("/api/upload")
 async def upload(file: UploadFile = File(...), mode: str = Form("arrange"), melody_program: int = Form(73),
                  split_hands: bool = Form(True), send_to_drive: bool = Form(False), drive_path: str = Form(""),
-                 drive_folder: str = Form(""), limit_seconds: float = Form(0)):
+                 drive_folder: str = Form(""), limit_seconds: float = Form(0),
+                 listen_twice: bool = Form(False)):
     _check_options(mode, melody_program)
     name = Path(file.filename or "song").name
     stem, ext = Path(name).stem, Path(name).suffix.lower()
@@ -585,6 +588,7 @@ async def upload(file: UploadFile = File(...), mode: str = Form("arrange"), melo
         raise HTTPException(400, "That file is empty.")
     job = pipeline.Job(title=stem[:150] or "Song", mode=mode, source="upload", upload_path=str(dest),
                        duration_hint=_probe_seconds(dest), limit_seconds=_check_limit(limit_seconds),
+                       listen_twice=bool(listen_twice),
                        melody_program=melody_program, split_hands=split_hands,
                        send_to_drive=send_to_drive, drive_path=drive_path or None, drive_folder=_clean_folder(drive_folder))
     return add_job(job)

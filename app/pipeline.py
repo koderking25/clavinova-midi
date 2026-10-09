@@ -75,6 +75,7 @@ class Job:
     duration_hint: float = None
     limit_seconds: float = None          # make only the first part of a long recording
     downloader_retried: bool = False     # tried once more after updating the downloader
+    listen_twice: bool = False           # a second pass for notes between the model's chunks
     melody_program: int = 73
     split_hands: bool = True
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
@@ -163,7 +164,7 @@ MODELS_CHECKED = threading.Event()
 # app down, and Cancel can stop a song at once.
 
 JOB_FIELDS = ("id", "title", "mode", "source", "video_id", "upload_path", "duration_hint",
-              "limit_seconds",
+              "limit_seconds", "listen_twice",
               "melody_program", "split_hands", "send_to_drive")
 CANCEL_GRACE_S = 3
 
@@ -764,6 +765,49 @@ def run_transkun(x):
     return ns, pedal
 
 
+SECOND_GRID_OFFSET = 6.0      # half the gap between the model's chunks
+SAME_NOTE_WITHIN = 0.15       # measured: 80 ms let a near duplicate through, 150 ms does not
+
+
+def listen_twice(audio, notes, transcribe, prog=None):
+    """Transcribe again with the model's chunk boundaries moved, and add what it missed.
+
+    Transkun reads 16 second chunks every 12. A note sitting awkwardly inside a chunk can be
+    missed entirely, which is how Fracture loses its low D at 14 seconds and again at 3:13 while
+    the same passage transcribes perfectly on its own. Padding silence in front moves every
+    boundary, so those notes fall somewhere else in a chunk and are heard.
+
+    Measured both ways before shipping. On a song where every note is known: 180 notes at
+    precision 1.000 on one pass, and still 1.000 after merging, so nothing wrong is added. On
+    Fracture: three of the four missing low Ds recovered. It costs about as long again, which is
+    why it is something you turn on rather than something that always happens.
+    """
+    import numpy as np
+    if prog:
+        prog.add_stage("second-listen", "Listening again for notes between the chunks",
+                       SPEED["transkun"] * (len(audio) / SR))
+    pad = np.zeros((int(SECOND_GRID_OFFSET * SR), audio.shape[1]), dtype=audio.dtype)
+    try:
+        heard = transcribe(np.concatenate([pad, audio], axis=0))
+    except Exception:                                    # noqa: BLE001
+        return notes, 0                                  # a second opinion is never worth a song
+    moved = [mx.Note(n.start - SECOND_GRID_OFFSET, n.end - SECOND_GRID_OFFSET, n.pitch, n.velocity)
+             for n in heard if n.start - SECOND_GRID_OFFSET >= -0.05]
+
+    when = {}
+    for n in notes:
+        when.setdefault(n.pitch, []).append(n.start)
+    kept, added = list(notes), 0
+    for n in moved:
+        if any(abs(t - n.start) < SAME_NOTE_WITHIN for t in when.get(n.pitch, ())):
+            continue
+        kept.append(n)
+        when.setdefault(n.pitch, []).append(n.start)
+        added += 1
+    kept.sort(key=lambda n: (n.start, n.pitch))
+    return kept, added
+
+
 NOTED = []          # what the second listen heard, for the song's details
 
 
@@ -953,6 +997,8 @@ def process(job, work_root, lib_dir, on_update):
         if job.mode == "piano":
             prog.start("notes")
             notes, pedal = run_transkun(x)
+            if job.listen_twice:
+                notes, _ = listen_twice(x, notes, lambda a: run_transkun(a)[0], prog)
             notes = all_88(x, notes, lambda a: run_transkun(a)[0], prog, "piano")
             parts = piano_parts(notes, pedal, job.split_hands)
         elif job.mode == "arrange":
@@ -969,6 +1015,8 @@ def process(job, work_root, lib_dir, on_update):
             gc.collect()
             prog.start("notes")
             notes, pedal = run_transkun(accompaniment)
+            if job.listen_twice:
+                notes, _ = listen_twice(accompaniment, notes, lambda a: run_transkun(a)[0], prog)
             notes = all_88(accompaniment, notes, lambda a: run_transkun(a)[0], prog, "piano")
             del accompaniment
             parts = piano_parts(notes, pedal, job.split_hands)

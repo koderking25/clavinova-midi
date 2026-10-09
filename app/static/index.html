@@ -164,6 +164,13 @@ footer { max-width: 880px; margin: 0 auto; padding: 0 20px 40px; color: var(--mu
       </datalist>
       <span class="hint" id="limit-note" style="display:block;margin-top:4px">For long recordings. It fades out at the end instead of stopping mid-bar.</span>
     </div>
+    <div class="opts" id="opt-twice">
+      <label><input type="checkbox" id="listen-twice"> Listen twice, for notes the first pass misses</label>
+      <span class="hint" style="display:block;margin-top:4px">The AI reads the song in 16 second
+        pieces, and a note sitting awkwardly inside one can be missed. A second pass with those
+        pieces moved finds it. Takes about twice as long, and on a song where every note is known
+        it adds nothing wrong.</span>
+    </div>
     <div class="opts" id="opt-split"><label><input type="checkbox" id="split"> Put the left and right hand on separate parts, so you can turn one off on your piano and play it yourself</label></div>
     <div class="opts" id="opt-melody" hidden><label>Melody instrument <select id="melody"></select></label></div>
   </section>
@@ -330,6 +337,12 @@ $("#search-form").addEventListener("submit", async e => {
 });
 const looksLikeLink = t => /^(https?:\/\/|www\.|youtu\.be\/|(m\.|music\.)?youtube\.com)/i.test(t.trim());
 
+// Whether to transcribe a second time with the AI's chunk boundaries moved.
+function listenTwice() {
+  const box = $("#listen-twice");
+  return !!(box && box.checked);
+}
+
 // How much of the recording to make, in seconds, or nothing for all of it.
 function limitSeconds() {
   if (!$("#limit-on") || !$("#limit-on").checked) return null;
@@ -377,7 +390,7 @@ function renderYouTube(d) {
     b.addEventListener("click", async () => {
       b.disabled = true;
       try {
-        await api("/api/jobs", { method: "POST", json: { video_id: v.id, title: v.title, duration: v.duration, limit_seconds: limitSeconds(), mode: S.mode, melody_program: +S.melody, split_hands: !!S.split, ...batchFields() } });
+        await api("/api/jobs", { method: "POST", json: { video_id: v.id, title: v.title, duration: v.duration, limit_seconds: limitSeconds(), listen_twice: listenTwice(), mode: S.mode, melody_program: +S.melody, split_hands: !!S.split, ...batchFields() } });
         b.textContent = "Added"; toast(`Making "${v.title}". This takes a few minutes.`); refreshJobs(true);
       } catch (err) { b.disabled = false; toast(err.message, 6000); }
     });
@@ -412,6 +425,7 @@ function uploadFile(file, left = 0) { return new Promise(resolve => {
   fd.append("file", file); fd.append("mode", S.mode); fd.append("melody_program", S.melody); fd.append("split_hands", S.split ? "true" : "false");
   const b = batchFields(); fd.append("send_to_drive", b.send_to_drive ? "true" : "false"); fd.append("drive_path", b.drive_path || ""); fd.append("drive_folder", b.drive_folder);
   fd.append("limit_seconds", String(limitSeconds() || 0));
+  fd.append("listen_twice", listenTwice() ? "true" : "false");
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/upload"); xhr.setRequestHeader("x-clavinova", "1");
   toast(`Uploading "${file.name}"...`, 60000);
@@ -844,6 +858,11 @@ $("#storage-refresh").onclick = refreshStorage;
     store.set("limit-mins", tidyMinutes());
     if (S.lastYouTube) renderYouTube(S.lastYouTube);
   };
+  const twice = $("#listen-twice");
+  if (twice) {
+    twice.checked = store.get("listen-twice", false);
+    twice.addEventListener("change", () => store.set("listen-twice", twice.checked));
+  }
   on.addEventListener("change", paint);
   mins.addEventListener("input", paint);
   mins.addEventListener("change", () => { mins.value = tidyMinutes(); paint(); });
