@@ -235,6 +235,10 @@ def friendly_download_error(msg):
     if "challenge" in m or "javascript" in m or "js runtime" in m or "nsig" in m or "signature" in m:
         return ("YouTube changed something and the downloader needs an update. "
                 "Click 'Update downloader' at the bottom of the page, then try again.")
+    if "403" in m or "forbidden" in m:
+        return ("YouTube refused the download three times. This is usually temporary: wait a minute "
+                "and try again. If it keeps happening, click 'Update downloader' at the bottom of "
+                "the page.")
     if "max_filesize" in m or "larger than max" in m:
         return "That file is too big. Pick a shorter video."
     if "timed out" in m or "urlopen error" in m or "network" in m or "connection" in m:
@@ -242,10 +246,23 @@ def friendly_download_error(msg):
     return "The download failed. Try a different result, or drop in an audio file instead."
 
 
+DOWNLOAD_ATTEMPTS = 3
+
+# Things that will not improve by asking again: no point making someone wait through three tries.
+PERMANENT_FAILURES = ("private video", "age-restricted", "sign in to confirm your age",
+                      "video unavailable", "has been removed", "not available in your country",
+                      "max_filesize", "larger than max", "members-only", "is live",
+                      "this live event", "inappropriate for some users")
+
+
+def _is_permanent(message):
+    low = message.lower()
+    return any(bad in low for bad in PERMANENT_FAILURES)
+
+
 def download_youtube_audio(video_id, dest_dir, on_progress=None, cancel=None):
     """Download one video's audio into dest_dir. Returns the file path."""
     dest_dir = Path(dest_dir)
-    PACER.wait("youtube")
 
     def hook(d):
         if cancel and cancel():
@@ -269,8 +286,29 @@ def download_youtube_audio(video_id, dest_dir, on_progress=None, cancel=None):
         "match_filter": yt_dlp.utils.match_filter_func(f"duration < {MAX_SONG_SECONDS} & !is_live"),
     }
     url = f"https://www.youtube.com/watch?v={urllib.parse.quote(video_id)}"
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.download([url])
+    # YouTube hands out media addresses that sometimes refuse the very next request with a 403.
+    # yt-dlp's own retries re-request the same address, which stays refused, so the whole download
+    # fails on something that works a second later. Start again from scratch instead: a new
+    # YoutubeDL asks YouTube for a fresh address. Seen on 9 October 2026, when the same video
+    # failed and then downloaded immediately afterwards with nothing else changed.
+    last = None
+    for attempt in range(DOWNLOAD_ATTEMPTS):
+        if cancel and cancel():
+            raise yt_dlp.utils.DownloadCancelled("cancelled")
+        PACER.wait("youtube")
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([url])
+            break
+        except yt_dlp.utils.DownloadCancelled:
+            raise
+        except Exception as e:                               # noqa: BLE001
+            last = e
+            if attempt == DOWNLOAD_ATTEMPTS - 1 or _is_permanent(str(e)):
+                raise
+            for leftover in dest_dir.glob("source.*"):       # a half file would be mistaken for the song
+                leftover.unlink(missing_ok=True)
+            time.sleep(2 + attempt * 3)
     files = [p for p in dest_dir.glob("source.*") if not p.name.endswith((".part", ".ytdl"))]
     if not files:
         raise RuntimeError("video too long or not downloadable")
