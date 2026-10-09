@@ -214,10 +214,20 @@ def check_update_memory(repair=True):
 
 def check_downloader():
     import shutil as _s
-    if _s.which("deno") or _s.which("node"):
+    if not (_s.which("deno") or _s.which("node")):
+        return (False, "Deno is missing, so downloading from YouTube will fail. Dropping in your own audio "
+                "files still works.", "install_tools", False)
+    try:
+        import downloader
+        state = downloader.state()
+        checked = state.get("last_checked")
+        when = ""
+        if checked:
+            days = (time.time() - checked) / 86400
+            when = " checked today." if days < 1 else f" last checked {int(days)} days ago."
+        return True, f"The song downloader is ready (version {state['version']}).{when}", None, False
+    except Exception:                                    # noqa: BLE001
         return True, "The song downloader is ready.", None, False
-    return (False, "Deno is missing, so downloading from YouTube will fail. Dropping in your own audio "
-            "files still works.", "install_tools", False)
 
 
 def check_storage():

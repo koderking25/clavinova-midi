@@ -226,8 +226,16 @@ stay in `state/errors.log` for debugging.
 
 ### Other things
 
-- **YouTube downloads fail**: YouTube changes often. Click *Update downloader*
-  at the bottom of the page. The app updates and restarts itself.
+- **YouTube downloads**: Midify keeps its own downloader current. It looks for a
+  newer one once a day, quietly, and never while a song is being made. If a
+  download fails in a way that says YouTube moved something (a refused address,
+  a changed signature), it updates there and then and tries the song once more.
+  Failures that will not improve by asking again (private, age-restricted,
+  removed) are reported straight away instead. *Update downloader* at the bottom
+  of the page still forces it by hand.
+- A refused download is retried up to three times from scratch, because YouTube
+  hands out addresses that sometimes refuse the very next request, and asking
+  again with the same address never helps.
 - **"Your Mac is almost out of space"**: each song needs a few hundred MB while
   it is being made. Free up a few GB.
 - **Error details** are saved in `state/errors.log`.

@@ -34,6 +34,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile  # n
 from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
+import downloader  # noqa: E402
 import health  # noqa: E402
 import platform_bits  # noqa: E402
 import pipeline  # noqa: E402
@@ -259,6 +260,21 @@ def drive_sender():
             save_queue()
 
 
+def keep_downloader_current():
+    """Once a day, quietly, make sure the YouTube downloader is the newest one.
+
+    YouTube changes how it serves video every few weeks and yt-dlp follows within days. Waiting for
+    someone to notice downloads failing and press a button is the wrong way round."""
+    time.sleep(90)                                   # let the app finish opening first
+    while True:
+        try:
+            busy = lambda: any(j.status in ("running", "queued") for j in JOBS.values())  # noqa: E731
+            downloader.routine_check(busy=busy, note=health.note)
+        except Exception:                            # noqa: BLE001
+            pass                                     # never let housekeeping break the app
+        time.sleep(6 * 60 * 60)
+
+
 def start_background():
     """Everything the engine runs besides the web server. Shared by the app window and server.py."""
     import updater
@@ -269,6 +285,7 @@ def start_background():
     threading.Thread(target=drive_sender, daemon=True).start()
     threading.Thread(target=updater.startup, daemon=True).start()
     threading.Thread(target=check_health_at_startup, daemon=True).start()
+    threading.Thread(target=keep_downloader_current, daemon=True).start()
 
 
 @app.middleware("http")
@@ -326,6 +343,19 @@ def worker():
         except pipeline.Cancelled:
             job.status, job.stage = "cancelled", "Cancelled"
         except pipeline.UserError as e:
+            # A download that failed because YouTube moved something is worth one more go with an
+            # up to date downloader, rather than handing back an error nobody can act on.
+            raw = getattr(e, "raw", str(e))
+            if not job.downloader_retried and downloader.youtube_moved(raw):
+                job.downloader_retried = True
+                job.stage = "Updating the song downloader"
+                changed, said = downloader.update_because_it_failed(raw, note=health.note)
+                if changed:
+                    job.status, job.error, job.progress = "queued", None, 0.0
+                    job.stage = "Trying again with the new downloader"
+                    Q.put(job)
+                    save_queue()
+                    continue
             job.status, job.error = "error", str(e)
             health.note(f'"{job.title}" could not be made. {e}')
         except MemoryError as e:

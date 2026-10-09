@@ -74,6 +74,7 @@ class Job:
     upload_path: str = None
     duration_hint: float = None
     limit_seconds: float = None          # make only the first part of a long recording
+    downloader_retried: bool = False     # tried once more after updating the downloader
     melody_program: int = 73
     split_hands: bool = True
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
@@ -922,7 +923,9 @@ def process(job, work_root, lib_dir, on_update):
             except Exception as e:  # noqa: BLE001
                 if job.cancelled:
                     raise Cancelled()
-                raise UserError(sources.friendly_download_error(str(e)))
+                friendly = UserError(sources.friendly_download_error(str(e)))
+                friendly.raw = str(e)          # so the engine can tell a YouTube change from a bad song
+                raise friendly
         else:
             src = Path(job.upload_path)
 
