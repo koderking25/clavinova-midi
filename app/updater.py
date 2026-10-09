@@ -32,13 +32,21 @@ import urllib.request
 from pathlib import Path
 
 REPO = "koderking25/clavinova-midi"
-ASSET = "Midify.dmg"                 # releases also carry the old name, for apps from before the rename
-LEGACY_ASSET = "Clavinova-MIDI-Maker.dmg"
+# Which app this updater is working for. Midify's values are the defaults, so nothing about
+# Midify changes; Convertify sets these in its launcher and gets the same update machinery.
+ASSET = os.environ.get("UPDATE_ASSET", "Midify.dmg")
+LEGACY_ASSET = os.environ.get("UPDATE_LEGACY_ASSET", "Clavinova-MIDI-Maker.dmg")
+TAG_PREFIX = os.environ.get("UPDATE_TAG_PREFIX", "v")
+# Convertify's releases are marked pre-release so they never become GitHub's "latest" and confuse
+# Midify, which means Convertify has to read the list of releases and find its own newest.
+FROM_LIST = os.environ.get("UPDATE_FROM_LIST") == "1"
+ALLOW_PRERELEASE = os.environ.get("UPDATE_ALLOW_PRERELEASE") == "1"
 BUNDLE_ID = "com.koderking25.clavinova-midi-maker"
 # Only a test sets CLAVINOVA_UPDATE_API, to install a local build end to end. A normal launch
 # never has it, so the app only ever looks at this repository's real releases.
 TEST_API = os.environ.get("CLAVINOVA_UPDATE_API")
-API = TEST_API or f"https://api.github.com/repos/{REPO}/releases/latest"
+API = TEST_API or (f"https://api.github.com/repos/{REPO}/releases?per_page=20" if FROM_LIST
+                   else f"https://api.github.com/repos/{REPO}/releases/latest")
 # Half an hour between looks, not six. A look that finds nothing is a conditional request that
 # GitHub answers with 304 and almost no data, so this is cheap and well inside what GitHub allows
 # unauthenticated. The old six hours meant an update published in the morning was unknown to an
@@ -265,19 +273,28 @@ class Updater:
 
     @staticmethod
     def _pick(data):
-        if data.get("draft") or data.get("prerelease"):
+        if isinstance(data, list):                        # the list endpoint: find this app's newest
+            for release in data:
+                found = Updater._pick(release)
+                if found:
+                    return found
+            return None
+        if data.get("draft") or (data.get("prerelease") and not ALLOW_PRERELEASE):
+            return None
+        if TAG_PREFIX and not str(data.get("tag_name") or "").startswith(TAG_PREFIX):
             return None
         assets = data.get("assets") or []
         # Midify's file first; the old name too, so a release from before the rename still counts.
         asset = next((a for name in (ASSET, LEGACY_ASSET) for a in assets if a.get("name") == name), None)
-        if not asset or not parse_version(data.get("tag_name")) or not trusted_url(asset.get("browser_download_url")):
+        tag_version = str(data.get("tag_name") or "")[len(TAG_PREFIX):]
+        if not asset or not parse_version(tag_version) or not trusted_url(asset.get("browser_download_url")):
             return None
         return {"tag": data["tag_name"], "url": asset.get("browser_download_url"), "size": asset.get("size"),
                 "digest": asset.get("digest"), "notes_url": data.get("html_url")}
 
     def _apply_release(self, release, cur, checked_at):
         self._release = release
-        latest = release["tag"].lstrip("vV") if release else None
+        latest = release["tag"][len(TAG_PREFIX):].lstrip("vV") if release else None
         newer = bool(release and parse_version(latest) and parse_version(cur)
                      and parse_version(latest) > parse_version(cur))
         self._set(state="available" if newer else "up_to_date", latest=latest,

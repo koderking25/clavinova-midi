@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "mac" / "build"
 NAME = "Convertify"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 BUNDLE_ID = "com.koderking25.convertify"
 APP = OUT / f"{NAME}.app"
 SHARED = ("sources.py", "downloader.py", "usb.py", "platform_bits.py")
@@ -35,6 +35,16 @@ export PATH="$RES/tools/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$P
 export PYTHONPYCACHEPREFIX="$SUPPORT/pycache"       # never write compiled code inside a signed app
 export CONVERTIFY_STATE="$SUPPORT/state"
 export CLAVINOVA_STATE="$SUPPORT/state"            # the shared parts use this name
+
+# Convertify updates itself with Midify's machinery, pointed at its own releases. Those are
+# marked pre-release so they never become GitHub's "latest" and confuse Midify, which is why this
+# reads the list of releases rather than the latest one.
+export UPDATE_ASSET="Convertify.dmg"
+export UPDATE_LEGACY_ASSET="Convertify.dmg"
+export UPDATE_TAG_PREFIX="convertify-v"
+export UPDATE_FROM_LIST=1
+export UPDATE_ALLOW_PRERELEASE=1
+export CONVERTIFY_VERSION="__VERSION__"
 export CONVERTIFY_WORK="$SUPPORT/work"
 
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >>"$LOG"; }
@@ -106,7 +116,7 @@ def main():
         return 1
 
     launcher = macos / NAME
-    launcher.write_text(LAUNCHER)
+    launcher.write_text(LAUNCHER.replace("__VERSION__", VERSION))
     launcher.chmod(0o755)
 
     plist = {

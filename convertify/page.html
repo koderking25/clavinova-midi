@@ -3,152 +3,369 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Convertify</title>
 <style>
-  /* Same family as Midify, its own colour: a link in, an MP3 out. */
+  /* Midify's cousin: same bones, greener, louder, and rather more pleased with itself. */
   :root {
-    --bg: #f2f4f1; --card: #fbfdfa; --ink: #19201b; --muted: #5f6b61; --line: #d9e2d8;
-    --accent: #1f6b4a; --accent-soft: #dfeee6; --accent-ink: #ffffff;
-    --ok: #2d6a39; --warn: #8a5d00; --bad: #a3261c; --bad-soft: #f8e0dc;
-    --radius: 14px; --shadow: 0 1px 2px rgba(20,40,25,.06), 0 4px 16px rgba(20,40,25,.05);
+    --bg: #eef5ef; --card: #ffffff; --ink: #16231a; --muted: #5a6b5f; --line: #d4e3d6;
+    --accent: #0f7a4d; --accent-2: #58c98b; --accent-soft: #dcf2e5; --accent-ink: #ffffff;
+    --bad: #a3261c; --bad-soft: #fae3e0; --warn: #8a5d00;
+    --radius: 16px; --shadow: 0 1px 2px rgba(10,40,25,.06), 0 10px 28px rgba(10,40,25,.07);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #121613; --card: #1b211d; --ink: #e9f0e9; --muted: #9aa89d; --line: #30392f;
-      --accent: #63c195; --accent-soft: #1b3129; --accent-ink: #0c1711;
-      --ok: #7fc98c; --warn: #e5b85a; --bad: #f08a7e; --bad-soft: #3b201d; --shadow: none;
+      --bg: #0e1511; --card: #162019; --ink: #e8f3ea; --muted: #93a699; --line: #28362d;
+      --accent: #5fd79b; --accent-2: #2b9c6a; --accent-soft: #15301f; --accent-ink: #06160e;
+      --bad: #f28b7d; --bad-soft: #3a1f1c; --warn: #e6bd5d; --shadow: none;
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  .wave { height: 26px; border-bottom: 1px solid var(--line); background:
-    repeating-linear-gradient(90deg, var(--accent) 0 2px, transparent 2px 9px); opacity: .35; }
-  main { max-width: 760px; margin: 0 auto; padding: 26px 20px 60px; display: grid; gap: 18px; }
-  h1 { font-size: 26px; margin: 0; letter-spacing: -.02em; }
-  .lead { color: var(--muted); margin: 6px 0 0; }
+         font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+
+  .topwave { height: 40px; width: 100%; display: block; }
+  main { max-width: 820px; margin: 0 auto; padding: 18px 20px 70px; display: grid; gap: 16px; }
+  header h1 { font-size: 30px; margin: 0; letter-spacing: -.025em; }
+  header h1 .dot { color: var(--accent); }
+  .tagline { color: var(--muted); margin: 4px 0 0; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
           padding: 18px 20px; box-shadow: var(--shadow); }
-  h2 { font: 600 12px/1.2 -apple-system, system-ui, sans-serif; text-transform: uppercase;
-       letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+  h2 { font: 700 11px/1.2 -apple-system, system-ui, sans-serif; text-transform: uppercase;
+       letter-spacing: .1em; color: var(--muted); margin: 0 0 12px; }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  input[type=text] { flex: 1 1 320px; min-width: 0; padding: 11px 13px; border: 1px solid var(--line);
-                     border-radius: 9px; background: var(--bg); color: var(--ink); font-size: 15px; }
-  input[type=text]:focus-visible, button:focus-visible, select:focus-visible {
+  input[type=text], input[type=search] { flex: 1 1 300px; min-width: 0; padding: 12px 14px;
+    border: 1px solid var(--line); border-radius: 11px; background: var(--bg); color: var(--ink); font-size: 15px; }
+  select, input[type=number] { padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px;
+    background: var(--bg); color: var(--ink); font-size: 14px; }
+  input:focus-visible, select:focus-visible, button:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 2px; }
-  select { padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px;
-           background: var(--bg); color: var(--ink); font-size: 14px; }
-  button { font: inherit; padding: 10px 16px; border-radius: 9px; border: 1px solid var(--line);
-           background: var(--card); color: var(--ink); cursor: pointer; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
-  button.small { padding: 6px 11px; font-size: 13px; }
-  button:disabled { opacity: .55; cursor: default; }
-  .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
-  .job { border-top: 1px solid var(--line); padding: 13px 0; display: grid; gap: 7px; }
+  button { font: inherit; padding: 11px 17px; border-radius: 11px; border: 1px solid var(--line);
+           background: var(--card); color: var(--ink); cursor: pointer; transition: transform .08s ease; }
+  button:active { transform: scale(.97); }
+  button.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2));
+                   border: 0; color: var(--accent-ink); font-weight: 700; }
+  button.small { padding: 7px 12px; font-size: 13px; border-radius: 9px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hint { color: var(--muted); font-size: 13px; margin: 9px 0 0; }
+  label.inline { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 14px; }
+
+  /* the format chips */
+  .kinds { display: flex; gap: 8px; flex-wrap: wrap; }
+  .kind { border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; cursor: pointer;
+          background: var(--card); font-size: 14px; display: inline-flex; gap: 7px; align-items: center; }
+  .kind[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); font-weight: 650; }
+  .kind .zip { font-size: 11px; color: var(--accent); font-weight: 700; }
+
+  /* the mesmerising bit */
+  .stage { position: relative; height: 92px; border-radius: 13px; overflow: hidden;
+           background: var(--accent-soft); border: 1px solid var(--line); }
+  .stage canvas { width: 100%; height: 100%; display: block; }
+  .stage .pct { position: absolute; right: 12px; top: 10px; font-variant-numeric: tabular-nums;
+                font-weight: 700; color: var(--accent); font-size: 13px; }
+  .stage .what { position: absolute; left: 13px; top: 9px; font-size: 13px; color: var(--ink); font-weight: 600; }
+
+  .job { border-top: 1px dashed var(--line); padding: 14px 0; display: grid; gap: 9px; }
   .job:first-child { border-top: 0; padding-top: 2px; }
-  .job .top { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
-  .name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  .job .top { display: flex; gap: 10px; justify-content: space-between; align-items: baseline; }
+  .name { font-weight: 650; overflow-wrap: anywhere; }
   .meta { color: var(--muted); font-size: 13px; }
-  .bar { height: 7px; background: var(--line); border-radius: 4px; overflow: hidden; }
-  .bar span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s ease; }
-  .msg { padding: 10px 12px; border-radius: 9px; font-size: 14px; }
+  .msg { padding: 10px 13px; border-radius: 11px; font-size: 14px; }
   .msg.bad { background: var(--bad-soft); color: var(--bad); }
-  .empty { color: var(--muted); margin: 0; }
-  footer { max-width: 760px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 13px;
+  .msg.good { background: var(--accent-soft); color: var(--accent); }
+  .results { display: grid; gap: 8px; }
+  .hit { display: flex; gap: 11px; align-items: center; border: 1px solid var(--line);
+         border-radius: 12px; padding: 9px 11px; background: var(--card); }
+  .hit img { width: 76px; height: 43px; object-fit: cover; border-radius: 7px; flex: none; }
+  .hit .grow { flex: 1; min-width: 0; }
+  .hit .t { font-weight: 600; overflow-wrap: anywhere; }
+  footer { max-width: 820px; margin: 0 auto; padding: 0 20px 44px; color: var(--muted); font-size: 13px;
            display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
   footer button { background: none; border: 0; color: var(--muted); text-decoration: underline;
                   cursor: pointer; padding: 0; font-size: 13px; }
-  @media (prefers-reduced-motion: reduce) { .bar span { transition: none; } }
+  .banner { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 13px;
+            padding: 12px 15px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  @media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
 </style>
 
-<div class="wave"></div>
+<canvas class="topwave" id="topwave" aria-hidden="true"></canvas>
 <main>
   <header>
-    <h1>Convertify</h1>
-    <p class="lead">Paste a YouTube link, get an MP3. It runs on this Mac, over your own connection,
-      and the finished file is shown to you in Finder.</p>
+    <h1>Convertify<span class="dot">.</span></h1>
+    <p class="tagline" id="tagline">Paste a link, pick a flavour, press the big green button. 🎧</p>
   </header>
 
+  <div class="banner" id="update-banner" hidden>
+    <span id="update-text">A newer Convertify is out. 🎉</span>
+    <button class="small primary" id="update-go">Update now</button>
+  </div>
+
   <section class="card">
-    <h2>1. The link</h2>
+    <h2>1. Find something 🔍</h2>
     <div class="row">
-      <input type="text" id="link" placeholder="https://www.youtube.com/watch?v=..." aria-label="YouTube link"
-             autocomplete="off" spellcheck="false">
-      <label class="meta">Quality
-        <select id="quality" aria-label="Sound quality">
-          <option value="320">320 kbps, best</option>
-          <option value="256">256 kbps</option>
-          <option value="192">192 kbps</option>
-          <option value="128">128 kbps, smallest</option>
-        </select>
-      </label>
-      <button class="primary" id="go">Convert</button>
+      <input type="search" id="q" placeholder="Song name, or paste a YouTube link" aria-label="Search or paste a link">
+      <button class="primary" id="search">Search</button>
     </div>
-    <p class="hint" id="hint">Shorts, music links and links with a time or playlist on the end all work.</p>
+    <p class="hint" id="search-hint">Links of every shape work: watch, youtu.be, Shorts, music, even with a playlist stuck on the end.</p>
+    <div class="results" id="results" style="margin-top:12px"></div>
   </section>
 
-  <section class="card" id="list-card" hidden>
-    <h2>Conversions</h2>
-    <div id="list"></div>
+  <section class="card">
+    <h2>2. Pick a flavour 🍧</h2>
+    <div class="kinds" id="kinds"></div>
+    <div class="row" style="margin-top:13px">
+      <label class="inline">Quality
+        <select id="quality">
+          <option value="320">320 kbps, the good stuff</option>
+          <option value="256">256 kbps</option>
+          <option value="192">192 kbps</option>
+          <option value="128">128 kbps, tiny</option>
+        </select>
+      </label>
+      <label class="inline"><input type="checkbox" id="limit-on"> Only the first
+        <input type="text" id="limit-mins" value="5" list="mins" inputmode="numeric" style="width:4em"
+               aria-label="How many minutes"> minutes ✂️</label>
+      <datalist id="mins"><option value="1"></option><option value="2"></option><option value="3"></option>
+        <option value="5"></option><option value="10"></option><option value="15"></option></datalist>
+    </div>
+    <p class="hint" id="kind-hint"></p>
+  </section>
+
+  <section class="card">
+    <h2>3. Where it lands 📁</h2>
+    <div class="row">
+      <span class="meta" id="folder">Downloads</span>
+      <button class="small" id="pick-folder">Choose a folder</button>
+      <button class="small" id="open-folder">Open it</button>
+    </div>
+    <div class="row" id="drive-row" style="margin-top:10px" hidden>
+      <label class="inline"><input type="checkbox" id="to-drive"> Also copy onto
+        <select id="drive" aria-label="Flash drive"></select> 🔌</label>
+    </div>
+    <p class="hint">It opens the folder and picks your file out the moment it is done. No hunting. ✨</p>
+  </section>
+
+  <section class="card" id="work-card" hidden>
+    <h2>Working on it 🛠️</h2>
+    <div class="stage" id="stage">
+      <canvas id="viz"></canvas>
+      <span class="what" id="viz-what"></span>
+      <span class="pct" id="viz-pct"></span>
+    </div>
+    <div id="list" style="margin-top:6px"></div>
   </section>
 </main>
 <footer>
-  <span id="where"></span>
-  <button id="open-folder">Open the folder</button>
-  <span id="dl"></span>
+  <span id="where-note"></span>
+  <span id="dl-note"></span>
+  <span id="ver-note"></span>
+  <button id="check-update">Check for updates</button>
 </footer>
 
 <script>
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
 
 async function api(path, opts = {}) {
   const o = { ...opts, headers: { ...(opts.headers || {}) } };
   if (o.method && o.method !== "GET") o.headers["x-convertify"] = "1";
   if (o.json !== undefined) { o.body = JSON.stringify(o.json); o.headers["content-type"] = "application/json"; delete o.json; }
   let r;
-  try { r = await fetch(path, o); } catch { throw new Error("Convertify stopped. Open it again."); }
+  try { r = await fetch(path, o); } catch { throw new Error("Convertify went quiet. Open it again."); }
   let data = null; try { data = await r.json(); } catch {}
-  if (!r.ok) throw new Error((data && (data.detail || data.error)) || "Something went wrong.");
+  if (!r.ok) throw new Error((data && (data.detail || data.error)) || "That did not work.");
   return data;
 }
 
-const mmss = s => s == null ? "" : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+const EMOJI = { mp3: "🎵", m4a: "⚡", wav: "🌊", flac: "💎", aac: "🎚️", midi: "🎹" };
+const QUIPS = [
+  "Teaching the internet to hand it over. 📼",
+  "Rounding up the ones and zeros. 🧲",
+  "Politely asking YouTube for the audio. 🙇",
+  "Shaking the bits until music falls out. 🫨",
+  "Persuading ffmpeg to hurry up. 🏃",
+  "Almost there, looking busy. 👀",
+];
+let S = { kind: store.get("kind", "mp3"), status: null, jobs: [], results: [] };
 
-function render(jobs) {
-  const card = $("#list-card"), list = $("#list");
-  card.hidden = !jobs.length;
+/* ---------- the mesmerising bit: a wave that flows while it works ---------- */
+const viz = $("#viz"), vctx = viz.getContext("2d");
+// Not "top": a browser window already has one, and redeclaring it stops the whole script.
+const topWave = $("#topwave"), tctx = topWave.getContext("2d");
+let phase = 0, shown = 0, target = 0, busy = false;
+
+function paintWave(canvas, ctx, { height, bars, progress, lively }) {
+  const w = canvas.width = canvas.clientWidth * devicePixelRatio;
+  const h = canvas.height = height * devicePixelRatio;
+  ctx.clearRect(0, 0, w, h);
+  const css = getComputedStyle(document.documentElement);
+  const accent = css.getPropertyValue("--accent").trim();
+  const accent2 = css.getPropertyValue("--accent-2").trim();
+  const gap = 5 * devicePixelRatio, bw = Math.max(2 * devicePixelRatio, w / bars - gap);
+  for (let i = 0; i < bars; i++) {
+    const x = i * (bw + gap);
+    const ratio = i / bars;
+    // Two waves sliding over each other: never quite repeats, which is the point.
+    const swing = Math.sin(phase + ratio * 7) * 0.5 + Math.sin(phase * 1.7 + ratio * 13) * 0.3;
+    const rest = S.kind === "midi" ? (i % 7 === 2 || i % 7 === 5 ? 0.78 : 0.42) : 0.45;
+    const amp = lively ? rest + swing * 0.42 : rest * 0.55;
+    const bh = Math.max(3 * devicePixelRatio, Math.abs(amp) * h * 0.78);
+    const done = ratio <= progress;
+    ctx.fillStyle = done ? accent : accent2;
+    ctx.globalAlpha = done ? 1 : 0.28;
+    const r = Math.min(bw / 2, 3 * devicePixelRatio);
+    ctx.beginPath();
+    ctx.roundRect(x, (h - bh) / 2, bw, bh, r);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function tick() {
+  shown += (target - shown) * 0.08;
+  phase += busy ? 0.075 : 0.012;
+  paintWave(viz, vctx, { height: 92, bars: 54, progress: shown, lively: busy });
+  paintWave(topWave, tctx, { height: 40, bars: 90, progress: 1, lively: busy });
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+/* ---------- the flavours ---------- */
+function paintKinds() {
+  const box = $("#kinds");
+  if (!S.status) return;
+  box.innerHTML = "";
+  for (const [key, label] of Object.entries(S.status.formats)) {
+    const b = document.createElement("button");
+    b.className = "kind";
+    b.setAttribute("aria-pressed", String(S.kind === key));
+    const fast = (S.status.fast || []).includes(key);
+    b.innerHTML = `<span>${EMOJI[key] || "🎵"}</span><span>${esc(key.toUpperCase())}</span>` +
+      (fast ? `<span class="zip">FASTEST</span>` : "");
+    b.title = label;
+    b.onclick = () => {
+      if (key === "midi" && !S.status.midi_ready) {
+        $("#kind-hint").textContent = "🎹 MIDI is Midify's trick, and Midify is not installed yet. " +
+          "Get Midify and this lights up on its own.";
+        return;
+      }
+      S.kind = key; store.set("kind", key); paintKinds();
+    };
+    box.append(b);
+  }
+  const label = S.status.formats[S.kind] || "";
+  const fast = (S.status.fast || []).includes(S.kind);
+  $("#kind-hint").textContent = S.kind === "midi"
+    ? "🎹 Midify does the listening and writes the notes. Slowest of the lot, and the most fun."
+    : `${label}.${fast ? " Nothing to re-encode, so this one is quick. ⚡" : ""}`;
+  $("#quality").disabled = ["wav", "flac", "midi"].includes(S.kind) ||
+    (S.kind === "m4a" && !$("#limit-on").checked);
+}
+
+/* ---------- searching ---------- */
+async function doSearch() {
+  const q = $("#q").value.trim();
+  if (q.length < 2) { $("#q").focus(); return; }
+  const b = $("#search");
+  b.disabled = true; b.textContent = "Looking…";
+  $("#results").innerHTML = `<p class="meta">Rummaging through YouTube… 🧐</p>`;
+  try {
+    const d = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    S.results = d.results || [];
+    paintResults(d.pasted);
+  } catch (e) {
+    $("#results").innerHTML = `<div class="msg bad">${esc(e.message)}</div>`;
+  } finally {
+    b.disabled = false; b.textContent = "Search";
+  }
+}
+
+function paintResults(pasted) {
+  const box = $("#results");
+  box.innerHTML = "";
+  if (!S.results.length) { box.innerHTML = `<p class="meta">Nothing found. Different words? 🤔</p>`; return; }
+  if (pasted) box.innerHTML = `<p class="meta">Straight from your link: 🔗</p>`;
+  for (const v of S.results) {
+    const el = document.createElement("div");
+    el.className = "hit";
+    const mins = v.duration ? `${Math.floor(v.duration / 60)}:${String(Math.round(v.duration % 60)).padStart(2, "0")}` : "";
+    el.innerHTML = (v.thumbnail ? `<img src="${esc(v.thumbnail)}" alt="">` : "") +
+      `<div class="grow"><div class="t">${esc(v.title)}</div>
+       <div class="meta">${esc(v.channel || "")}${mins ? " · " + mins : ""}</div></div>`;
+    const go = document.createElement("button");
+    go.className = "primary small"; go.textContent = `Convert ${EMOJI[S.kind] || ""}`;
+    go.onclick = () => start(v.id ? `https://www.youtube.com/watch?v=${v.id}` : $("#q").value.trim(), go);
+    el.append(go);
+    box.append(el);
+  }
+}
+
+/* ---------- converting ---------- */
+function limitSeconds() {
+  if (!$("#limit-on").checked) return null;
+  const asked = parseInt(String($("#limit-mins").value).replace(/[^0-9]/g, ""), 10);
+  return (Number.isFinite(asked) ? Math.max(1, Math.min(15, asked)) : 5) * 60;
+}
+
+async function start(link, button) {
+  if (!link) return;
+  const was = button ? button.textContent : "";
+  if (button) { button.disabled = true; button.textContent = "Off we go…"; }
+  try {
+    await api("/api/convert", { method: "POST", json: {
+      link, quality: $("#quality").value, kind: S.kind, limit_seconds: limitSeconds(),
+      save_to: S.status && S.status.save_to,
+      to_drive: $("#to-drive") && $("#to-drive").checked ? $("#drive").value : null,
+    } });
+    $("#tagline").textContent = QUIPS[Math.floor(Math.random() * QUIPS.length)];
+    refresh();
+  } catch (e) {
+    $("#search-hint").textContent = e.message;
+  } finally {
+    if (button) { button.disabled = false; button.textContent = was; }
+  }
+}
+
+function paintJobs() {
+  const card = $("#work-card"), list = $("#list");
+  card.hidden = !S.jobs.length;
+  const live = S.jobs.find(j => ["queued", "downloading", "converting"].includes(j.status));
+  busy = !!live;
+  target = live ? (live.progress || 0) : (S.jobs.length ? 1 : 0);
+  $("#viz-what").textContent = live ? live.stage : (S.jobs[0] ? "Done ✅" : "");
+  $("#viz-pct").textContent = live ? `${Math.round((live.progress || 0) * 100)}%` : "";
   list.innerHTML = "";
-  for (const j of jobs) {
+  for (const j of S.jobs.slice(0, 8)) {
     const el = document.createElement("div");
     el.className = "job";
     const done = j.status === "done";
-    const busy = j.status === "downloading" || j.status === "converting" || j.status === "queued";
-    el.innerHTML = `<div class="top">
-        <span class="name">${esc(j.title || j.link)}</span>
-        <span class="meta">${esc(j.quality)} kbps${j.seconds ? " &middot; " + mmss(j.seconds) : ""}</span>
-      </div>
+    el.innerHTML = `<div class="top"><span class="name">${EMOJI[j.kind] || "🎵"} ${esc(j.title || j.link)}</span>
+      <span class="meta">${esc((j.kind || "").toUpperCase())}${j.limit_seconds ? " · first " + Math.round(j.limit_seconds / 60) + " min" : ""}</span></div>
       <div class="meta">${esc(done ? "Saved as " + j.file : j.stage)}</div>`;
-    if (busy) {
-      const bar = document.createElement("div");
-      bar.className = "bar";
-      bar.innerHTML = `<span style="width:${Math.round((j.progress || 0) * 100)}%"></span>`;
-      el.append(bar);
-      const stop = document.createElement("button");
-      stop.className = "small"; stop.textContent = "Cancel";
-      stop.onclick = () => api(`/api/jobs/${j.id}/cancel`, { method: "POST" }).then(refresh);
-      el.append(stop);
+    if (j.drive_status) {
+      const d = document.createElement("div");
+      d.className = "meta"; d.textContent = "🔌 " + j.drive_status;
+      el.append(d);
     }
     if (j.error) {
       const bad = document.createElement("div");
-      bad.className = "msg bad"; bad.textContent = j.error;
+      bad.className = "msg bad"; bad.textContent = "😖 " + j.error;
       el.append(bad);
     }
     if (done) {
       const show = document.createElement("button");
-      show.className = "small"; show.textContent = "Show in Finder";
-      show.onclick = () => api("/api/reveal", { method: "POST", json: { file: j.file } })
-        .catch(e => alert(e.message));
+      show.className = "small"; show.textContent = "Show me 👀";
+      show.onclick = () => api("/api/reveal", { method: "POST", json: { file: j.file, folder: j.folder } })
+        .catch(e => { $("#search-hint").textContent = e.message; });
       el.append(show);
+    }
+    if (["queued", "downloading", "converting"].includes(j.status)) {
+      const stop = document.createElement("button");
+      stop.className = "small"; stop.textContent = "Stop";
+      stop.onclick = () => api(`/api/jobs/${j.id}/cancel`, { method: "POST" }).then(refresh);
+      el.append(stop);
     }
     list.append(el);
   }
@@ -158,37 +375,63 @@ let timer;
 async function refresh() {
   clearTimeout(timer);
   try {
-    const jobs = await api("/api/jobs");
-    render(jobs);
-    const working = jobs.some(j => ["queued", "downloading", "converting"].includes(j.status));
-    timer = setTimeout(refresh, working ? 700 : 3000);
-  } catch {
-    timer = setTimeout(refresh, 3000);
-  }
+    S.jobs = await api("/api/jobs");
+    paintJobs();
+  } catch {}
+  const live = S.jobs.some(j => ["queued", "downloading", "converting"].includes(j.status));
+  timer = setTimeout(refresh, live ? 600 : 3000);
 }
 
-$("#go").onclick = async () => {
-  const link = $("#link").value.trim();
-  if (!link) { $("#link").focus(); return; }
-  const b = $("#go");
-  b.disabled = true; b.textContent = "Starting...";
-  try {
-    await api("/api/convert", { method: "POST", json: { link, quality: $("#quality").value } });
-    $("#link").value = "";
-    $("#hint").textContent = "Converting. The folder opens with your file picked out when it is done.";
-    refresh();
-  } catch (e) {
-    $("#hint").textContent = e.message;
-  } finally {
-    b.disabled = false; b.textContent = "Convert";
-  }
+/* ---------- the rest of the furniture ---------- */
+$("#search").onclick = doSearch;
+$("#q").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+$("#limit-on").addEventListener("change", paintKinds);
+$("#pick-folder").onclick = async () => {
+  const r = await api("/api/choose-folder", { method: "POST" }).catch(() => null);
+  if (r && r.folder) { S.status.save_to = r.folder; paintWhere(); }
 };
-$("#link").addEventListener("keydown", e => { if (e.key === "Enter") $("#go").click(); });
 $("#open-folder").onclick = () => api("/api/open-folder", { method: "POST" }).catch(() => {});
+$("#check-update").onclick = async () => {
+  const b = $("#check-update");
+  b.textContent = "Looking…";
+  try {
+    const u = await api("/api/update/check", { method: "POST" });
+    paintUpdate(u);
+    b.textContent = u && u.state === "available" ? "Update ready" : "Up to date ✅";
+  } catch (e) { b.textContent = "Check for updates"; }
+};
+$("#update-go").onclick = async () => {
+  $("#update-text").textContent = "Updating… hold tight. 🚀";
+  await api("/api/update/install", { method: "POST" }).catch(() => {});
+};
+
+function paintWhere() {
+  const folder = (S.status && S.status.save_to) || "Downloads";
+  $("#folder").textContent = folder.replace(/^\/Users\/[^/]+/, "~");
+  $("#where-note").textContent = `Lands in ${folder.replace(/^\/Users\/[^/]+/, "~")}`;
+}
+
+function paintUpdate(u) {
+  const banner = $("#update-banner");
+  if (!u || u.state !== "available") { banner.hidden = true; return; }
+  banner.hidden = false;
+  $("#update-text").textContent = `Convertify ${u.latest} is out, and it is better than this one. 🎉`;
+}
 
 api("/api/status").then(s => {
-  $("#where").textContent = `Saves to ${s.save_to}`;
-  $("#dl").textContent = `Downloader ${s.downloader}`;
+  S.status = s;
+  if (!store.get("kind", null)) S.kind = "mp3";
+  paintKinds();
+  paintWhere();
+  $("#dl-note").textContent = `Downloader ${s.downloader}`;
+  $("#ver-note").textContent = `Convertify ${s.version}`;
+  const usable = (s.drives || []).filter(d => d.writable);
+  if (usable.length) {
+    $("#drive-row").hidden = false;
+    $("#drive").innerHTML = usable.map(d =>
+      `<option value="${esc(d.path)}">${esc(d.name)}</option>`).join("");
+  }
+  paintUpdate(s.update);
 }).catch(() => {});
 refresh();
 </script>
