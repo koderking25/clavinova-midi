@@ -2,7 +2,7 @@
 
 The one rule: a failed update never leaves you without a working app.
 
-  check    Ask GitHub for the latest release, at most every 6 hours on its own. Repeat
+  check    Ask GitHub for the latest release, at most every 30 minutes on its own. Repeat
            checks send the last answer's ETag, and GitHub does not count those against its
            limit of 60 an hour. If GitHub says slow down, the app waits an hour.
   download The disk image goes to Application Support, and must match the size and the
@@ -39,7 +39,14 @@ BUNDLE_ID = "com.koderking25.clavinova-midi-maker"
 # never has it, so the app only ever looks at this repository's real releases.
 TEST_API = os.environ.get("CLAVINOVA_UPDATE_API")
 API = TEST_API or f"https://api.github.com/repos/{REPO}/releases/latest"
-CHECK_EVERY = 6 * 3600
+# Half an hour between looks, not six. A look that finds nothing is a conditional request that
+# GitHub answers with 304 and almost no data, so this is cheap and well inside what GitHub allows
+# unauthenticated. The old six hours meant an update published in the morning was unknown to an
+# app left open all day.
+CHECK_EVERY = 30 * 60
+# Coming back to the window is a good moment to look, but not every single time: switching apps
+# quickly should not mean a request each time.
+FOCUS_GAP = 5 * 60
 MANUAL_GAP = 60
 BACKOFF = 3600
 MAX_DOWNLOAD = 50 * 1024 * 1024
@@ -167,6 +174,13 @@ class Updater:
         s["can_install"] = bool(bundle_path()) and self.quit_hook is not None
         return s
 
+    def last_looked(self):
+        """When GitHub was last asked, as a timestamp. Zero if it never has been."""
+        try:
+            return float(self._load_cache().get("checked_at") or 0)
+        except Exception:                                    # noqa: BLE001
+            return 0.0
+
     def _set(self, **kw):
         with self.lock:
             self.status.update(kw)
@@ -187,7 +201,9 @@ class Updater:
             pass
 
     # ---------- check ----------
-    def check(self, manual=False):
+    def check(self, manual=False, soon=False):
+        """soon: coming back to the window, so skip the every-half-hour gate but nothing else.
+        A pause GitHub has asked for is still respected, and no error is shown for one."""
         cur = current_version()
         self._set(current=cur)
         if not cur:
@@ -211,7 +227,7 @@ class Updater:
                 self._apply_release(cache.get("release"), cur, cache.get("checked_at"))
                 return self.snapshot()
             self._last_manual = now
-        elif now - cache.get("checked_at", 0) < CHECK_EVERY:
+        elif not soon and now - cache.get("checked_at", 0) < CHECK_EVERY:
             self._apply_release(cache.get("release"), cur, cache.get("checked_at"))
             return self.snapshot()
 
@@ -474,6 +490,30 @@ def tidy_leftovers(target=None):
 
 
 UPDATER = Updater()
+
+
+def check_soon(reason="window"):
+    """A quick look, for when the window comes back to the front. Quiet about failures."""
+    import threading
+    gap = FOCUS_GAP if reason == "window" else 0
+    try:
+        if time.time() - UPDATER.last_looked() < gap:
+            return False
+        threading.Thread(target=lambda: UPDATER.check(soon=True), daemon=True).start()
+        return True
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+def watch_for_updates(stop=None):
+    """Keep looking while the app is open, so a release does not wait for the next restart."""
+    import threading
+    while not (stop and stop.is_set()):
+        time.sleep(CHECK_EVERY)
+        try:
+            UPDATER.check()
+        except Exception:                                    # noqa: BLE001
+            pass                                             # the next look will try again
 
 
 def startup():

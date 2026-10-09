@@ -294,6 +294,15 @@ it never gets flagged. To clear the flag on a copy you already downloaded:
 xattr -dr com.apple.quarantine "/Applications/Midify.app"
 ```
 
+### How soon you hear about an update
+
+The app asks GitHub when it opens, **every 30 minutes while it is open**, and whenever you come
+back to the window (at most once every 5 minutes). A check that finds nothing is a conditional
+request answered with 304 and almost no data, so this is cheap and well inside what GitHub allows.
+
+It used to ask once at opening and then not for six hours, so a release published in the morning
+was still unknown to an app left open all day.
+
 ### Updates install themselves
 
 From version 1.4.0 the app keeps itself up to date. It checks this repository's

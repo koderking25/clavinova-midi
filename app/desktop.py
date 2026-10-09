@@ -65,6 +65,15 @@ class Delegate(NSObject):
     def applicationShouldTerminateAfterLastWindowClosed_(self, sender):
         return True
 
+    # Coming back to Midify is the moment to find out an update exists, rather than waiting for
+    # the next half-hourly look or the next restart.
+    def applicationDidBecomeActive_(self, notification):
+        try:
+            import updater
+            updater.check_soon("window")
+        except Exception:                                    # noqa: BLE001
+            pass                                             # never let a check stop the window working
+
     # "Choose a file" opens the real macOS panel.
     def webView_runOpenPanelWithParameters_initiatedByFrame_completionHandler_(
             self, web_view, params, frame, handler):

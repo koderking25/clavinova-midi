@@ -286,6 +286,7 @@ def start_background():
     threading.Thread(target=updater.startup, daemon=True).start()
     threading.Thread(target=check_health_at_startup, daemon=True).start()
     threading.Thread(target=keep_downloader_current, daemon=True).start()
+    threading.Thread(target=updater.watch_for_updates, daemon=True).start()
 
 
 @app.middleware("http")
