@@ -295,7 +295,11 @@ def start_engine(web, url):
         threading.Thread(target=serve_in_background, daemon=True).start()
     if wait_for_server(url):
         print(f"engine ready after {time.time() - STARTED:.1f} s", flush=True)
-        AppHelper.callAfter(web.loadRequest_, NSURLRequest.requestWithURL_(NSURL.URLWithString_(url)))
+        # Never from the browser's own store: an update replaces this page, and a held copy
+        # would show the version from before it. 1 is NSURLRequestReloadIgnoringLocalCacheData.
+        AppHelper.callAfter(web.loadRequest_,
+                            NSURLRequest.requestWithURL_cachePolicy_timeoutInterval_(
+                                NSURL.URLWithString_(url), 1, 30))
     else:
         print("the engine did not start within 90 s", flush=True)
         AppHelper.callAfter(show_problem, web, "The app could not start its engine. Quit it with Cmd+Q and "

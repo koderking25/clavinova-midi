@@ -119,8 +119,12 @@ def main():
                 break
             time.sleep(0.5)
         from PyObjCTools import AppHelper
+        # Ask for the page itself every time, never from the browser's own store. The app can
+        # replace that page during an update, and a held copy means installing an update and
+        # still looking at the version before it. 1 is NSURLRequestReloadIgnoringLocalCacheData.
         AppHelper.callAfter(lambda: web.loadRequest_(
-            NSURLRequest.requestWithURL_(NSURL.URLWithString_(URL))))
+            NSURLRequest.requestWithURL_cachePolicy_timeoutInterval_(
+                NSURL.URLWithString_(URL), 1, 30)))
 
     threading.Thread(target=show_when_ready, daemon=True).start()
     from PyObjCTools import AppHelper
