@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "mac" / "build"
 NAME = "Convertify"
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 BUNDLE_ID = "com.koderking25.convertify"
 APP = OUT / f"{NAME}.app"
 # updater.py belongs here too: without it the app imported nothing for updates and every check
@@ -56,8 +56,13 @@ alert() { osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 
 VENV="$SUPPORT/venv"
 if [ ! -x "$VENV/bin/python" ]; then
   say "first run: building the environment"
-  # In the background on purpose: a dialog waits for a click, and the setup should not.
+  # In the background on purpose: a dialog waits for a click, and the setup should not. Its pid
+  # is kept so it can be taken away when the setup it describes has finished. Without that it
+  # waits for a click for ever: one was found still sitting there seventeen hours later,
+  # promising that this takes about a minute.
   alert "Setting Convertify up. This takes about a minute, and only happens once." &
+  TELLING=$!
+  trap 'kill $TELLING 2>/dev/null; pkill -P $TELLING 2>/dev/null' EXIT
   if ! command -v uv >/dev/null 2>&1; then
     say "installing uv"
     curl -LsSf https://astral.sh/uv/install.sh | sh >>"$LOG" 2>&1
@@ -75,6 +80,8 @@ if [ ! -x "$VENV/bin/python" ]; then
     exit 1
   }
   say "environment ready"
+  kill "$TELLING" 2>/dev/null; pkill -P "$TELLING" 2>/dev/null   # the news is out of date now
+  trap - EXIT
 fi
 
 cd "$RES"
