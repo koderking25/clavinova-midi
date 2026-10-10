@@ -405,7 +405,10 @@ async def only_this_mac(request, call_next):
 
 @app.get("/")
 def page():
-    return FileResponse(HERE / "page.html")
+    # No caching. The page changes with every update, and a browser holding on to the old one
+    # means installing an update and still looking at the previous app. Midify has sent this
+    # from the start; this one did not, and a stale page turned up the first time it mattered.
+    return FileResponse(HERE / "page.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/status")

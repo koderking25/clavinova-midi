@@ -101,5 +101,28 @@ class HidingWorks(unittest.TestCase):
         self.assertEqual(unhideable(fixed), [])
 
 
+class PageIsNeverStale(unittest.TestCase):
+    """Both apps must tell the browser not to hold on to the page.
+
+    An app that updates itself and then serves a cached page has not really updated. Convertify
+    served its page with no cache headers at all, and a browser duly showed the previous version
+    after an update had been installed.
+    """
+
+    SERVERS = [HERE / "convertify" / "engine.py", HERE / "app" / "server.py"]
+
+    def test_the_page_is_served_with_no_store(self):
+        for server in self.SERVERS:
+            with self.subTest(server=server.name):
+                src = server.read_text()
+                # the handler for "/" and the FileResponse that answers it
+                m = re.search(r'@app\.get\("/"\)\s*\ndef \w+\(\):(?:.|\n)*?return FileResponse\([^)]*\)',
+                              src)
+                self.assertIsNotNone(m, f"{server.name}: no handler for the page found")
+                self.assertIn("no-store", m.group(0),
+                              f"{server.name} serves its page without Cache-Control: no-store, "
+                              f"so a browser may show the version from before an update")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
