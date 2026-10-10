@@ -147,6 +147,7 @@ def video_info(link_or_id):
         seconds = info.get("duration")
         return {"id": video_id, "title": (info.get("title") or "Song")[:150],
                 "duration": seconds, "channel": info.get("uploader") or "",
+                "thumb": f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
                 "too_long": bool(seconds and seconds > MAX_SONG_SECONDS)}
 
     return _cached(("ytinfo", video_id), run)
@@ -179,8 +180,32 @@ def search_youtube(query, n=8):
                 "thumb": f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg",
                 "too_long": bool(dur and dur > MAX_SONG_SECONDS),
             })
+        for hit in out:
+            remember_video(hit)
         return out
     return _cached(("yt", query.lower().strip()), run)
+
+
+def remember_video(d):
+    """Treat a search result as the answer to "what is this video?".
+
+    A search already knows the title, the channel and the length of everything it found, which is
+    everything video_info returns. Without this, picking a result and converting it paid for a
+    second lookup of the same video: measured at 2.1 seconds of pure waiting before the download
+    could even start. Only remember it when the length is known, because the length is what
+    decides whether a recording is too long to take on."""
+    vid, dur = d.get("id"), d.get("duration")
+    if not vid or not dur:
+        return
+    with _cache_lock:
+        _cache[("ytinfo", vid)] = (time.time(), {
+            "id": vid,
+            "title": (d.get("title") or "Song")[:150],
+            "duration": int(dur),
+            "channel": d.get("channel") or "",
+            "thumb": d.get("thumb") or f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg",
+            "too_long": bool(dur > MAX_SONG_SECONDS),
+        })
 
 
 _FILLER = {"the", "and", "feat", "piano", "cover", "version", "official", "lyrics", "audio", "video",
@@ -313,6 +338,10 @@ def download_youtube_audio(video_id, dest_dir, on_progress=None, cancel=None, se
         "retries": 3,
         "fragment_retries": 3,
         "socket_timeout": 30,
+        # Some streams arrive in fragments, one request each. Fetched one at a time, the gaps
+        # between requests are most of the wall clock; four at once fills them in.
+        "concurrent_fragment_downloads": 4,
+        "noprogress": True,          # it was printing a progress bar into the app's log
         "match_filter": yt_dlp.utils.match_filter_func(duration_filter(seconds)),
     }
     # Deliberately not asking for only the wanted part. Downloading a range makes yt-dlp stream the

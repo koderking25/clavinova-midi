@@ -127,7 +127,9 @@
         <input type="text" id="limit-mins" value="5" list="mins" inputmode="numeric" style="width:4em"
                aria-label="How many minutes"> minutes ✂️</label>
       <datalist id="mins"><option value="1"></option><option value="2"></option><option value="3"></option>
-        <option value="5"></option><option value="10"></option><option value="15"></option></datalist>
+        <option value="5"></option><option value="10"></option><option value="15"></option>
+        <option value="20"></option><option value="30"></option><option value="45"></option>
+        <option value="60"></option></datalist>
     </div>
     <p class="hint" id="kind-hint"></p>
   </section>
@@ -183,6 +185,14 @@ async function api(path, opts = {}) {
   return data;
 }
 
+const HINT = "Links of every shape work: watch, youtu.be, Shorts, music, even with a playlist stuck on the end.";
+let hintTimer;
+function say(words, sticky) {
+  clearTimeout(hintTimer);
+  $("#search-hint").textContent = words;
+  if (!sticky) hintTimer = setTimeout(() => { $("#search-hint").textContent = HINT; }, 9000);
+}
+
 const EMOJI = { mp3: "🎵", m4a: "⚡", wav: "🌊", flac: "💎", aac: "🎚️", midi: "🎹" };
 const QUIPS = [
   "Teaching the internet to hand it over. 📼",
@@ -199,14 +209,29 @@ const viz = $("#viz"), vctx = viz.getContext("2d");
 // There used to be a strip of green dots across the top. It was decoration, it was busy, and
 // it earned nothing, so it is gone. The wave that matters is the one that moves while it works.
 let phase = 0, shown = 0, target = 0, busy = false;
+const calm = matchMedia("(prefers-reduced-motion: reduce)");
+
+// Asking the page for a colour means working out every style on it, and asking a canvas to
+// change size throws away everything on it. Doing either sixty times a second is how a page
+// gets warm and sticky to scroll. Both answers are kept until something actually changes.
+let ink = null;
+function colours() {
+  if (!ink) {
+    const css = getComputedStyle(document.documentElement);
+    ink = { accent: css.getPropertyValue("--accent").trim(),
+            accent2: css.getPropertyValue("--accent-2").trim() };
+  }
+  return ink;
+}
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { ink = null; });
 
 function paintWave(canvas, ctx, { height, bars, progress, lively }) {
-  const w = canvas.width = canvas.clientWidth * devicePixelRatio;
-  const h = canvas.height = height * devicePixelRatio;
+  const want = Math.round(canvas.clientWidth * devicePixelRatio);
+  const tall = Math.round(height * devicePixelRatio);
+  if (canvas.width !== want || canvas.height !== tall) { canvas.width = want; canvas.height = tall; }
+  const w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-  const css = getComputedStyle(document.documentElement);
-  const accent = css.getPropertyValue("--accent").trim();
-  const accent2 = css.getPropertyValue("--accent-2").trim();
+  const { accent, accent2 } = colours();
   const gap = 5 * devicePixelRatio, bw = Math.max(2 * devicePixelRatio, w / bars - gap);
   for (let i = 0; i < bars; i++) {
     const x = i * (bw + gap);
@@ -227,13 +252,30 @@ function paintWave(canvas, ctx, { height, bars, progress, lively }) {
   ctx.globalAlpha = 1;
 }
 
+// The wave used to redraw every frame for as long as the app was open, whether or not anything
+// was happening, which is a sixtieth of a second of work sixty times a second for a picture that
+// was not changing. Now it runs while there is something to show and stops when there is not.
+let running = false;
 function tick() {
+  const settling = Math.abs(target - shown) > 0.0015;
   shown += (target - shown) * 0.08;
-  phase += busy ? 0.075 : 0.012;
-  paintWave(viz, vctx, { height: 92, bars: 54, progress: shown, lively: busy });
+  if (!settling) shown = target;
+  phase += calm.matches ? 0 : (busy ? 0.075 : 0.012);
+  paintWave(viz, vctx, { height: 92, bars: 54, progress: shown, lively: busy && !calm.matches });
+  // Keep going while it is working, while the bar is still catching up, and never while the
+  // window is hidden behind something, where nobody can see it anyway.
+  if ((busy || settling) && !document.hidden) requestAnimationFrame(tick);
+  else running = false;
+}
+function wake() {
+  if (running || document.hidden) return;
+  running = true;
   requestAnimationFrame(tick);
 }
-requestAnimationFrame(tick);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) wake(); });
+addEventListener("resize", () => { if (!running) paintWave(viz, vctx,
+  { height: 92, bars: 54, progress: shown, lively: false }); });
+wake();
 
 /* ---------- the flavours ---------- */
 function paintKinds() {
@@ -255,6 +297,7 @@ function paintKinds() {
         return;
       }
       S.kind = key; store.set("kind", key); paintKinds();
+      if (S.results.length) paintResults(S.pasted);  // the Convert buttons wear the flavour's badge
     };
     box.append(b);
   }
@@ -277,6 +320,7 @@ async function doSearch() {
   try {
     const d = await api(`/api/search?q=${encodeURIComponent(q)}`);
     S.results = d.results || [];
+    S.pasted = d.pasted;
     paintResults(d.pasted);
   } catch (e) {
     $("#results").innerHTML = `<div class="msg bad">${esc(e.message)}</div>`;
@@ -294,7 +338,7 @@ function paintResults(pasted) {
     const el = document.createElement("div");
     el.className = "hit";
     const mins = v.duration ? `${Math.floor(v.duration / 60)}:${String(Math.round(v.duration % 60)).padStart(2, "0")}` : "";
-    el.innerHTML = (v.thumbnail ? `<img src="${esc(v.thumbnail)}" alt="">` : "") +
+    el.innerHTML = (v.thumb ? `<img src="${esc(v.thumb)}" alt="" loading="lazy">` : "") +
       `<div class="grow"><div class="t">${esc(v.title)}</div>
        <div class="meta">${esc(v.channel || "")}${mins ? " · " + mins : ""}</div></div>`;
     const go = document.createElement("button");
@@ -306,10 +350,19 @@ function paintResults(pasted) {
 }
 
 /* ---------- converting ---------- */
+const MOST_MINUTES = 60;
 function limitSeconds() {
   if (!$("#limit-on").checked) return null;
   const asked = parseInt(String($("#limit-mins").value).replace(/[^0-9]/g, ""), 10);
-  return (Number.isFinite(asked) ? Math.max(1, Math.min(15, asked)) : 5) * 60;
+  if (!Number.isFinite(asked)) return 5 * 60;
+  const used = Math.max(1, Math.min(MOST_MINUTES, asked));
+  // It used to quietly turn 30 into 15 and say nothing, so you got a quarter of an hour of a
+  // recording and no idea why.
+  if (used !== asked) {
+    say(`${asked} minutes is outside what this can take, so it is doing ${used}. ✂️`, true);
+    $("#limit-mins").value = String(used);
+  }
+  return used * 60;
 }
 
 async function start(link, button) {
@@ -323,66 +376,124 @@ async function start(link, button) {
       to_drive: $("#to-drive") && $("#to-drive").checked ? $("#drive").value : null,
     } });
     $("#tagline").textContent = QUIPS[Math.floor(Math.random() * QUIPS.length)];
-    refresh();
+    await refresh();
+    showTheWork();
   } catch (e) {
-    $("#search-hint").textContent = e.message;
+    say(e.message, true);
   } finally {
     if (button) { button.disabled = false; button.textContent = was; }
   }
+}
+
+// Pressing Convert should put you in front of the wave, not leave you to find it. The card only
+// exists once there is a job in it, so this runs after the first refresh has brought it back.
+function showTheWork() {
+  const card = $("#work-card");
+  if (card.hidden) return;
+  const calmly = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  card.scrollIntoView({ behavior: calmly ? "auto" : "smooth", block: "center" });
+}
+
+// Rows are kept and edited, not thrown away and remade. Rebuilding the whole list every few
+// hundred milliseconds made the text flicker, dropped a click that landed in the same moment,
+// and cleared anything you had selected to copy.
+const rows = new Map();
+
+function jobRow(j) {
+  let r = rows.get(j.id);
+  if (!r) {
+    const el = document.createElement("div");
+    el.className = "job";
+    el.innerHTML = `<div class="top"><span class="name"></span><span class="meta kind"></span></div>
+                    <div class="meta line"></div>`;
+    const buttons = document.createElement("div");
+    buttons.className = "row";
+    el.append(buttons);
+    r = { el, name: $(".name", el), kind: $(".kind", el), line: $(".line", el), buttons,
+          drive: null, bad: null, show: null, stop: null, was: {} };
+    rows.set(j.id, r);
+  }
+  return r;
+}
+
+function setText(node, text) {            // touching the DOM only when the words have changed
+  if (node.textContent !== text) node.textContent = text;
 }
 
 function paintJobs() {
   const card = $("#work-card"), list = $("#list");
   card.hidden = !S.jobs.length;
   const live = S.jobs.find(j => ["queued", "downloading", "converting"].includes(j.status));
+  const was = busy;
   busy = !!live;
-  target = live ? (live.progress || 0) : (S.jobs.length ? 1 : 0);
-  $("#viz-what").textContent = live ? live.stage : (S.jobs[0] ? "Done ✅" : "");
-  $("#viz-pct").textContent = live ? `${Math.round((live.progress || 0) * 100)}%` : "";
-  list.innerHTML = "";
-  for (const j of S.jobs.slice(0, 8)) {
-    const el = document.createElement("div");
-    el.className = "job";
-    const done = j.status === "done";
-    el.innerHTML = `<div class="top"><span class="name">${EMOJI[j.kind] || "🎵"} ${esc(j.title || j.link)}</span>
-      <span class="meta">${esc((j.kind || "").toUpperCase())}${j.limit_seconds ? " · first " + Math.round(j.limit_seconds / 60) + " min" : ""}</span></div>
-      <div class="meta">${esc(done ? "Saved as " + j.file : j.stage)}</div>`;
-    if (j.drive_status) {
-      const d = document.createElement("div");
-      d.className = "meta"; d.textContent = "🔌 " + j.drive_status;
-      el.append(d);
-    }
-    if (j.error) {
-      const bad = document.createElement("div");
-      bad.className = "msg bad"; bad.textContent = "😖 " + j.error;
-      el.append(bad);
-    }
-    if (done) {
-      const show = document.createElement("button");
-      show.className = "small"; show.textContent = "Show me 👀";
-      show.onclick = () => api("/api/reveal", { method: "POST", json: { file: j.file, folder: j.folder } })
-        .catch(e => { $("#search-hint").textContent = e.message; });
-      el.append(show);
-    }
-    if (["queued", "downloading", "converting"].includes(j.status)) {
-      const stop = document.createElement("button");
-      stop.className = "small"; stop.textContent = "Stop";
-      stop.onclick = () => api(`/api/jobs/${j.id}/cancel`, { method: "POST" }).then(refresh);
-      el.append(stop);
-    }
-    list.append(el);
+  const last = S.jobs[0];
+  target = live ? (live.progress || 0) : (last && last.status === "done" ? 1 : 0);
+  // It used to say "Done ✅" after anything at all, including a conversion that failed.
+  setText($("#viz-what"), live ? live.stage : !last ? ""
+    : last.status === "error" ? "That one did not work 😖"
+    : last.status === "cancelled" ? "Stopped" : "Done ✅");
+  setText($("#viz-pct"), live ? `${Math.round((live.progress || 0) * 100)}%` : "");
+  if (busy && !was) wake();
+  if (!busy && was) wake();               // one more pass so the bar settles where it stopped
+
+  const wanted = S.jobs.slice(0, 8);
+  for (const [id, r] of rows) {
+    if (!wanted.some(j => j.id === id)) { r.el.remove(); rows.delete(id); }
   }
+  wanted.forEach((j, i) => {
+    const r = jobRow(j), done = j.status === "done";
+    setText(r.name, `${EMOJI[j.kind] || "🎵"} ${j.title || j.link}`);
+    setText(r.kind, (j.kind || "").toUpperCase() +
+      (j.limit_seconds ? " · first " + Math.round(j.limit_seconds / 60) + " min" : ""));
+    setText(r.line, done ? "Saved as " + j.file : j.stage);
+
+    if (j.drive_status && !r.drive) {
+      r.drive = document.createElement("div"); r.drive.className = "meta";
+      r.el.insertBefore(r.drive, r.buttons);
+    }
+    if (r.drive) setText(r.drive, j.drive_status ? "🔌 " + j.drive_status : "");
+
+    if (j.error && !r.bad) {
+      r.bad = document.createElement("div"); r.bad.className = "msg bad";
+      r.el.insertBefore(r.bad, r.buttons);
+    }
+    if (r.bad) setText(r.bad, j.error ? "😖 " + j.error : "");
+
+    if (done && !r.show) {
+      r.show = document.createElement("button");
+      r.show.className = "small"; r.show.textContent = "Show me 👀";
+      r.show.onclick = () => api("/api/reveal", { method: "POST", json: { file: j.file, folder: j.folder } })
+        .catch(e => say(e.message));
+      r.buttons.append(r.show);
+    }
+    const running = ["queued", "downloading", "converting"].includes(j.status);
+    if (running && !r.stop) {
+      r.stop = document.createElement("button");
+      r.stop.className = "small"; r.stop.textContent = "Stop";
+      r.stop.onclick = () => api(`/api/jobs/${j.id}/cancel`, { method: "POST" }).then(refresh);
+      r.buttons.append(r.stop);
+    }
+    if (!running && r.stop) { r.stop.remove(); r.stop = null; }
+
+    if (list.children[i] !== r.el) list.insertBefore(r.el, list.children[i] || null);
+  });
 }
 
-let timer;
+let timer, quietSince = 0;
 async function refresh() {
   clearTimeout(timer);
   try {
     S.jobs = await api("/api/jobs");
+    if (quietSince) { say("Back with you. 👋"); quietSince = 0; }
     paintJobs();
-  } catch {}
+  } catch {
+    // It used to carry on polling in silence, so a stopped engine looked like a frozen app.
+    if (!quietSince) quietSince = Date.now();
+    if (Date.now() - quietSince > 4000)
+      say("Convertify's engine is not answering. Close the window and open it again. 🔌", true);
+  }
   const live = S.jobs.some(j => ["queued", "downloading", "converting"].includes(j.status));
-  timer = setTimeout(refresh, live ? 600 : 3000);
+  timer = setTimeout(refresh, live ? 600 : (quietSince ? 1500 : 3000));
 }
 
 /* ---------- the rest of the furniture ---------- */

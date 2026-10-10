@@ -8,6 +8,7 @@ Runs on your own machine over your own connection, like Midify. A website cannot
 browser is not allowed to fetch YouTube's media, so a hosted version would mean one server doing
 every download, which YouTube blocks quickly and which is a different thing legally.
 """
+import functools
 import json
 import os
 import re
@@ -50,6 +51,23 @@ STATE = Path(os.environ.get("CONVERTIFY_STATE", Path.home() / "Library" / "Appli
 FFMPEG = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
 QUALITIES = {"320": "320k", "256": "256k", "192": "192k", "128": "128k"}
 
+
+@functools.lru_cache(maxsize=1)
+def aac_encoder():
+    """Apple's AAC encoder when this Mac has it, ffmpeg's own otherwise.
+
+    Measured on five minutes of stereo: ffmpeg's built-in encoder took 4.42s and Apple's took
+    3.01s for the same request, and Apple's is the better encoder besides. Asked once, because
+    asking ffmpeg what it can do costs about a tenth of a second and the answer never changes."""
+    try:
+        out = subprocess.run([FFMPEG, "-hide_banner", "-encoders"],
+                             capture_output=True, text=True, timeout=20).stdout
+        if re.search(r"^\s*\S+\s+aac_at\b", out, re.M):
+            return "aac_at"
+    except Exception:                                      # noqa: BLE001
+        pass
+    return "aac"
+
 # What it can turn a video into. "keep" is the fast one: YouTube already sends m4a, so there is
 # nothing to re-encode, only to copy, which takes about a second whatever the length.
 FORMATS = {
@@ -60,6 +78,9 @@ FORMATS = {
     "aac":  {"ext": ".aac",  "label": "AAC", "fast": False},
     "midi": {"ext": ".mid",  "label": "MIDI, played by Midify", "fast": False},
 }
+# The most of a recording it will take in one go. The source may be up to four hours long; this
+# is how much of it comes out the other end. It matches the number the page will accept.
+MOST_SECONDS = 60 * 60
 MIDIFY_APP = Path("/Applications/Midify.app")
 MIDIFY_VENV = Path.home() / "Library" / "Application Support" / "Clavinova MIDI Maker" / "venv"
 app = FastAPI()
@@ -131,7 +152,7 @@ def convert_to(source, dest, kind, quality, title, artist, limit_seconds=None):
     if kind == "m4a" and Path(source).suffix.lower() == ".m4a" and not fade:
         codec = ["-c", "copy", "-movflags", "+faststart"]
     elif kind == "m4a":
-        codec = ["-c:a", "aac", "-b:a", QUALITIES.get(quality, "320k")]
+        codec = ["-c:a", aac_encoder(), "-b:a", QUALITIES.get(quality, "320k")]
     elif kind == "mp3":
         codec = ["-c:a", "libmp3lame", "-b:a", QUALITIES.get(quality, "320k"), "-id3v2_version", "3"]
     elif kind == "wav":
@@ -139,13 +160,23 @@ def convert_to(source, dest, kind, quality, title, artist, limit_seconds=None):
     elif kind == "flac":
         codec = ["-c:a", "flac"]
     elif kind == "aac":
-        codec = ["-c:a", "aac", "-b:a", QUALITIES.get(quality, "320k")]
+        codec = ["-c:a", aac_encoder(), "-b:a", QUALITIES.get(quality, "320k")]
     else:
         raise ValueError(f"Convertify cannot make a {kind} file.")
 
-    cmd = ([FFMPEG, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source), "-vn"]
-           + cut + fade + codec + tags + [str(dest)])
-    run = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    def attempt(with_codec):
+        cmd = ([FFMPEG, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                "-i", str(source), "-vn"] + cut + fade + with_codec + tags + [str(dest)])
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+
+    run = attempt(codec)
+    chose_the_quick_one = (len(codec) >= 2 and codec[0] == "-c:a"
+                           and codec[1] != "aac" and codec[1].startswith("aac"))
+    if (run.returncode != 0 or not dest.exists()) and chose_the_quick_one:
+        # Apple's encoder is the quick one, but it is pickier about what it will take. If it
+        # will not do this particular file, ffmpeg's own always will: slower beats refused.
+        dest.unlink(missing_ok=True)
+        run = attempt(["-c:a", "aac"] + codec[2:])
     if run.returncode != 0 or not dest.exists():
         raise RuntimeError((run.stderr or "ffmpeg could not make that file")[-300:])
     return dest
@@ -189,6 +220,78 @@ def to_midi(source, dest, limit_seconds=None, mode="piano"):
     return dest
 
 
+# One video, several formats: the audio only has to come down once.
+# Converting the same thing to MP3 and then to MIDI used to fetch it twice. The download is the
+# slow part, so the second format now starts at the encoding step.
+KEEP_FOR = 15 * 60            # a quarter of an hour, which covers "oh, and as a FLAC too"
+KEEP_MOST = 3                 # at most three videos held back
+KEEP_BYTES = 400 * 1024 * 1024
+KEPT = {}                     # video id -> {"path", "when", "seconds"}
+KEEP_LOCK = threading.Lock()
+
+
+def kept_folder():
+    return WORK / "kept"
+
+
+def tidy_kept():
+    """Drop what is stale, what is surplus, and anything whose file has gone."""
+    with KEEP_LOCK:
+        now = time.time()
+        for vid, e in list(KEPT.items()):
+            if now - e["when"] > KEEP_FOR or not Path(e["path"]).exists():
+                KEPT.pop(vid, None)
+                shutil.rmtree(Path(e["path"]).parent, ignore_errors=True)
+        order = sorted(KEPT.items(), key=lambda kv: kv[1]["when"], reverse=True)
+        total = 0
+        for i, (vid, e) in enumerate(order):
+            try:
+                total += Path(e["path"]).stat().st_size
+            except OSError:
+                total += 0
+            if i >= KEEP_MOST or total > KEEP_BYTES:
+                KEPT.pop(vid, None)
+                shutil.rmtree(Path(e["path"]).parent, ignore_errors=True)
+
+
+def kept_source(video_id, limit_seconds):
+    """The audio for this video if it is still here and may be used for this request.
+
+    A long recording is only allowed through when just part of it is being taken. A copy fetched
+    under that allowance must not become a way to convert the whole of something too long, so it
+    is only handed back when the new request would have been allowed to fetch it anyway."""
+    tidy_kept()
+    with KEEP_LOCK:
+        e = KEPT.get(video_id)
+        if not e:
+            return None
+        if not limit_seconds and e["seconds"] and e["seconds"] > sources.MAX_SONG_SECONDS:
+            return None
+        p = Path(e["path"])
+        return p if p.exists() else None
+
+
+def keep_source(video_id, src, seconds):
+    """Hold on to the downloaded audio in case another format is asked for next.
+
+    The file is moved rather than copied. The folder it was downloaded into is thrown away at the
+    end of the job anyway, and a four hour recording is a few hundred megabytes: copying it would
+    cost a second or two and twice the disk for no reason. Returns where it ended up, or the
+    original path if it could not be kept, which is a disappointment and not a failure."""
+    try:
+        home = kept_folder() / video_id
+        home.mkdir(parents=True, exist_ok=True)
+        held = home / Path(src).name
+        if held.resolve() != Path(src).resolve():
+            shutil.move(str(src), str(held))
+        with KEEP_LOCK:
+            KEPT[video_id] = {"path": str(held), "when": time.time(), "seconds": seconds}
+        tidy_kept()
+        return held if held.exists() else Path(src)
+    except Exception:                                      # noqa: BLE001
+        return Path(src)                                   # holding it is a nicety, never a need
+
+
 def work_on(job):
     folder = WORK / job.id
     folder.mkdir(parents=True, exist_ok=True)
@@ -203,9 +306,17 @@ def work_on(job):
         def progress(frac):
             job.progress = round(min(0.7, 0.7 * frac), 3)
 
-        src = sources.download_youtube_audio(sources.youtube_id(job.link), folder,
-                                             on_progress=progress, cancel=lambda: job.cancelled,
-                                             seconds=job.limit_seconds)
+        vid = sources.youtube_id(job.link)
+        already = kept_source(vid, job.limit_seconds)
+        if already:
+            job.stage = "Already have the audio, straight to it"
+            job.progress = 0.7
+            src = already
+        else:
+            src = sources.download_youtube_audio(vid, folder, on_progress=progress,
+                                                 cancel=lambda: job.cancelled,
+                                                 seconds=job.limit_seconds)
+            src = keep_source(vid, src, job.seconds)
         if job.cancelled:
             raise KeyboardInterrupt
         spec = FORMATS[job.kind]
@@ -352,6 +463,9 @@ def convert(ask: Ask):
                                  "listening. Install Midify and this appears straight away.")
     if ask.limit_seconds and ask.limit_seconds < 30:
         raise HTTPException(400, "Convert at least 30 seconds of it.")
+    if ask.limit_seconds and ask.limit_seconds > MOST_SECONDS:
+        raise HTTPException(400, f"The longest piece it will take is "
+                                 f"{MOST_SECONDS // 60} minutes.")
     if ask.save_to:
         folder = Path(ask.save_to).expanduser()
         if not folder.is_dir():
@@ -492,6 +606,12 @@ def keep_downloader_current():
 def start_background():
     for folder in (SAVE_TO, WORK, STATE):
         folder.mkdir(parents=True, exist_ok=True)
+    # Audio held back for a second format belongs to the run that fetched it. A new run knows
+    # nothing about it, so it would sit on the disk forever: clear it out on the way in.
+    shutil.rmtree(kept_folder(), ignore_errors=True)
+    for leftover in WORK.iterdir() if WORK.is_dir() else []:
+        if leftover.is_dir():
+            shutil.rmtree(leftover, ignore_errors=True)
     threading.Thread(target=worker, daemon=True).start()
     threading.Thread(target=keep_downloader_current, daemon=True).start()
 

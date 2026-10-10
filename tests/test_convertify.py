@@ -7,6 +7,7 @@ behaviour: naming, where files go, what it refuses, and that the finished file i
 """
 import os
 import shutil
+import time
 import subprocess
 import sys
 import tempfile
@@ -145,6 +146,21 @@ def main():
     except HTTPException as e:
         check("a folder that is not there is refused", True, str(e.detail)[:60])
 
+    print("\nA search result stands in for the lookup")
+    sources = engine.sources
+    vid = "abcdefghijk"
+    sources._cache.pop(("ytinfo", vid), None)
+    sources.remember_video({"id": vid, "title": "Found By Searching", "duration": 123,
+                            "channel": "Someone", "thumb": "https://i.ytimg.com/vi/x/mqdefault.jpg"})
+    before = dict(sources._cache)
+    got = sources.video_info(vid)        # must not touch the network at all
+    check("picking a result does not look the same video up again",
+          got["title"] == "Found By Searching" and got["duration"] == 123, str(got)[:70])
+    check("and nothing else was fetched to answer it", len(sources._cache) == len(before))
+    sources.remember_video({"id": "nodurationxx", "title": "No Length", "duration": None})
+    check("a result with no length is not trusted as the answer",
+          ("ytinfo", "nodurationxx") not in sources._cache)
+
     print("\nA whole conversion, with the download stood in for")
     engine.sources.video_info = lambda link: {"id": "x" * 11, "title": "Pretend Song",
                                               "duration": 20, "channel": "Nobody", "too_long": False}
@@ -166,8 +182,59 @@ def main():
           abs(length_of(engine.SAVE_TO / job.file) - 5) < 0.6,
           f"{length_of(engine.SAVE_TO / (job.file or 'x')):.1f}s")
     check("and shown to you without being asked", revealed == [job.file], str(revealed))
-    check("nothing is left in the working folder",
-          not any(engine.WORK.iterdir()) if engine.WORK.exists() else True)
+    check("the job's own working folder is cleared away",
+          not (engine.WORK / job.id).exists())
+
+    print("\nThe encoders")
+    check("it picks Apple's AAC encoder when this Mac has it",
+          engine.aac_encoder() in ("aac_at", "aac"), engine.aac_encoder())
+    was = engine.aac_encoder
+    try:
+        engine.aac_encoder = lambda: "aac_at_pretend_this_is_broken"
+        out = engine.SAVE_TO / "fallen-back.aac"
+        engine.convert_to(tone, out, "aac", "192", "T", "A")
+        check("and falls back to the one that always works if it is refused",
+              out.exists() and out.stat().st_size > 0)
+    finally:
+        engine.aac_encoder = was
+
+    print("\nThe same video, a second format")
+    # The download is the slow part. Asking for the same video again should not pay for it twice.
+    fetches = []
+
+    def counted_download(video_id, folder, on_progress=None, cancel=None, seconds=None):
+        fetches.append(video_id)
+        return fake_download(video_id, folder, on_progress, cancel, seconds)
+
+    engine.sources.download_youtube_audio = counted_download
+    again = engine.Job(link="https://youtu.be/hYH80WGPet8", kind="wav", limit_seconds=5,
+                       save_to=str(engine.SAVE_TO))
+    engine.work_on(again)
+    check("it finishes", again.status == "done", f"{again.status}: {again.error or ''}")
+    check("in the second format", (again.file or "").endswith(".wav"), str(again.file))
+    check("and it did not download it again", fetches == [], f"{len(fetches)} downloads")
+
+    third = engine.Job(link="https://youtu.be/hYH80WGPet8", kind="mp3", save_to=str(engine.SAVE_TO))
+    third.seconds = 20
+    engine.work_on(third)
+    check("a third format is still free", fetches == [], f"{len(fetches)} downloads")
+
+    # A long recording is only allowed through when part of it is being taken. The held copy must
+    # not become a side door to converting the whole of something too long.
+    vid = engine.sources.youtube_id("https://youtu.be/hYH80WGPet8")
+    with engine.KEEP_LOCK:
+        engine.KEPT[vid]["seconds"] = engine.sources.MAX_SONG_SECONDS + 600
+    check("a long one held back for a trim is not reused whole",
+          engine.kept_source(vid, None) is None)
+    check("but it is still there for another trim",
+          engine.kept_source(vid, 300) is not None)
+
+    # Stale copies go, so the disk does not fill up with videos nobody asked for again.
+    with engine.KEEP_LOCK:
+        engine.KEPT[vid]["when"] = time.time() - engine.KEEP_FOR - 5
+    engine.tidy_kept()
+    check("and it is thrown out once it is stale", engine.kept_source(vid, 300) is None)
+    check("with its file removed too", not (engine.WORK / "kept" / vid).exists())
 
     print()
     print(f"{len(passed)} passed, {len(failed)} failed")
