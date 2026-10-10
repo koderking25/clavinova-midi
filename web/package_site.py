@@ -27,16 +27,50 @@ WANTED_FILES = ["index.html", "_headers"]
 WANTED_DIRS = ["js", "models"]
 
 
+RELEASES = "https://github.com/koderking25/clavinova-midi/releases"
+
+
+def convertify_link():
+    """Where "Get Convertify" should point when this site goes up.
+
+    Not GitHub's /releases/latest: that skips pre-releases, and Convertify ships as one, so
+    that address lands on a Midify release instead. Asking which Convertify release is newest
+    keeps the site right without anyone having to remember a number. If the question cannot be
+    answered, the releases page is a worse link but never a wrong one."""
+    try:
+        out = subprocess.run(["gh", "release", "list", "--limit", "60", "--json", "tagName"],
+                             capture_output=True, text=True, timeout=30, cwd=ROOT)
+        import json
+        tags = [r["tagName"] for r in json.loads(out.stdout or "[]")
+                if r["tagName"].startswith("convertify-v")]
+        if tags:
+            newest = max(tags, key=lambda t: [int(n) for n in
+                                              t.replace("convertify-v", "").split(".")])
+            return f"{RELEASES}/tag/{newest}"
+    except Exception as e:                                 # noqa: BLE001
+        print(f"could not ask which Convertify release is newest ({e}); "
+              f"pointing at the releases page instead")
+    return RELEASES
+
+
 def main():
     if os.path.exists(OUT):
         shutil.rmtree(OUT)
     os.makedirs(SITE)
 
+    link = convertify_link()
     for name in WANTED_FILES:
         src = os.path.join(HERE, name)
         if not os.path.exists(src):
             sys.exit(f"missing {name}. The site cannot go up without it.")
         shutil.copy(src, SITE)
+        if name.endswith(".html"):
+            out = os.path.join(SITE, name)
+            with open(out) as f:
+                text = f.read()
+            with open(out, "w") as f:
+                f.write(text.replace("{{CONVERTIFY_LINK}}", link))
+    print(f"Convertify link: {link}")
     for name in WANTED_DIRS:
         src = os.path.join(HERE, name)
         if not os.path.isdir(src):

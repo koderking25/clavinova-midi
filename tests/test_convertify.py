@@ -198,6 +198,45 @@ def main():
     finally:
         engine.aac_encoder = was
 
+    print("\nHistory")
+    rows = engine.history()
+    check("the conversion that just finished is written down", len(rows) == 1, f"{len(rows)} rows")
+    one = rows[0] if rows else {}
+    check("with what it was", one.get("kind") == "flac", str(one.get("kind")))
+    check("what it is called", one.get("title") == "Pretend Song", str(one.get("title")))
+    check("where it went", one.get("folder") == str(engine.SAVE_TO), str(one.get("folder"))[:40])
+    check("and that the file is really there", one.get("still_there") is True)
+    check("it remembers the link, so it can be made again", "youtu" in (one.get("link") or ""))
+
+    moved = engine.SAVE_TO / one["file"]
+    kept_name = moved.name
+    moved.rename(engine.SAVE_TO / "somewhere else.flac")
+    check("a file you moved is shown as moved, not pretended to be there",
+          engine.history()[0]["still_there"] is False)
+    (engine.SAVE_TO / "somewhere else.flac").rename(engine.SAVE_TO / kept_name)
+
+    engine.forget(engine.Forget(id=one["id"]))
+    check("forgetting takes it off the list", len(engine.history()) == 0)
+    check("but never touches the file itself", (engine.SAVE_TO / kept_name).is_file())
+
+    # it has to survive the app being closed and opened
+    job2 = engine.Job(link="https://youtu.be/hYH80WGPet8", kind="mp3", save_to=str(engine.SAVE_TO))
+    job2.title = "Written Down"
+    engine.note_in_history(job2, engine.SAVE_TO / kept_name)
+    check("what is written down is on disk, not just in memory",
+          (engine.STATE / "history.json").is_file())
+    check("and reads back after a restart",
+          engine.read_history()[0]["title"] == "Written Down")
+
+    for n in range(engine.HISTORY_MOST + 20):
+        j = engine.Job(link="https://youtu.be/hYH80WGPet8", kind="mp3", save_to=str(engine.SAVE_TO))
+        j.title = f"Song {n}"
+        engine.note_in_history(j, engine.SAVE_TO / kept_name)
+    check("the list does not grow without end",
+          len(engine.read_history()) == engine.HISTORY_MOST, str(len(engine.read_history())))
+    engine.forget(engine.Forget(all=True))
+    check("and it can all be cleared at once", len(engine.history()) == 0)
+
     print("\nThe same video, a second format")
     # The download is the slow part. Asking for the same video again should not pay for it twice.
     fetches = []

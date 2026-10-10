@@ -343,6 +343,7 @@ def work_on(job):
 
         job.file, job.status, job.stage, job.progress = dest.name, "done", "Done", 1.0
         job.save_to = str(where)
+        note_in_history(job, dest)
         # What was asked for: show it, already picked out, in the folder it was saved to.
         platform_bits.reveal(dest)
     except KeyboardInterrupt:
@@ -536,6 +537,55 @@ def choose_folder():
     return {"ok": True, "folder": picked}
 
 
+# ---------- history: everything it has ever made ----------
+# Midify keeps every song it writes and lets you find it again. This is the same idea, kept as
+# a written record rather than by looking in a folder, because a converted file can be saved
+# anywhere, moved afterwards, or sit next to a thousand unrelated downloads.
+HISTORY_MOST = 300
+HISTORY_LOCK = threading.Lock()
+
+
+def history_file():
+    return STATE / "history.json"
+
+
+def read_history():
+    try:
+        rows = json.loads(history_file().read_text())
+        return rows if isinstance(rows, list) else []
+    except Exception:                                      # noqa: BLE001
+        return []
+
+
+def write_history(rows):
+    try:
+        STATE.mkdir(parents=True, exist_ok=True)
+        tmp = history_file().with_suffix(".json.part")
+        tmp.write_text(json.dumps(rows[:HISTORY_MOST]))
+        tmp.replace(history_file())                        # all of it or none of it
+    except Exception:                                      # noqa: BLE001
+        pass
+
+
+def note_in_history(job, dest):
+    """Write down one finished conversion. Newest first."""
+    with HISTORY_LOCK:
+        rows = read_history()
+        rows.insert(0, {
+            "id": job.id,
+            "title": job.title or dest.stem,
+            "kind": job.kind,
+            "file": dest.name,
+            "folder": str(dest.parent),
+            "link": job.link,
+            "when": time.time(),
+            "size": dest.stat().st_size if dest.exists() else 0,
+            "seconds": job.seconds,
+            "limit_seconds": job.limit_seconds,
+        })
+        write_history(rows)
+
+
 def remember(folder):
     try:
         STATE.mkdir(parents=True, exist_ok=True)
@@ -550,6 +600,32 @@ def remembered():
         return saved if saved and Path(saved).is_dir() else None
     except Exception:                                      # noqa: BLE001
         return None
+
+
+@app.get("/api/history")
+def history():
+    """Everything it has made, newest first, and whether each one is still where it was put."""
+    rows = read_history()
+    out = []
+    for r in rows:
+        here = Path(r.get("folder", "")) / r.get("file", "")
+        out.append({**r, "still_there": here.is_file()})
+    return out
+
+
+class Forget(BaseModel):
+    id: str | None = None
+    all: bool = False
+
+
+@app.post("/api/history/forget")
+def forget(ask: Forget):
+    """Take something out of the list. The file itself is yours and is never touched."""
+    with HISTORY_LOCK:
+        rows = read_history()
+        rows = [] if ask.all else [r for r in rows if r.get("id") != ask.id]
+        write_history(rows)
+    return {"ok": True, "left": len(rows)}
 
 
 @app.post("/api/open-folder")
