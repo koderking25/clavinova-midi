@@ -1,6 +1,6 @@
 """Anything the page hides with the hidden attribute has to actually leave the screen.
 
-Convertify shipped for four versions with an update banner that could not be hidden. The code
+Convertify, which used to live here, shipped four versions with a banner that could not hide. The code
 said banner.hidden = true, the property read back true, and the banner sat there anyway, because
 .banner set display:flex and any rule of ours beats the browser's own [hidden] { display: none }.
 Midify never had the bug only because its stylesheet carries display:none !important for [hidden].
@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
-PAGES = [HERE / "convertify" / "page.html", HERE / "app" / "static" / "index.html"]
+PAGES = [HERE / "app" / "static" / "index.html"]
 
 
 def styles(src):
@@ -102,14 +102,14 @@ class HidingWorks(unittest.TestCase):
 
 
 class PageIsNeverStale(unittest.TestCase):
-    """Both apps must tell the browser not to hold on to the page.
+    """The page must tell the browser not to hold on to it.
 
     An app that updates itself and then serves a cached page has not really updated. Convertify
     served its page with no cache headers at all, and a browser duly showed the previous version
     after an update had been installed.
     """
 
-    SERVERS = [HERE / "convertify" / "engine.py", HERE / "app" / "server.py"]
+    SERVERS = [HERE / "app" / "server.py"]
 
     def test_the_page_is_served_with_no_store(self):
         for server in self.SERVERS:

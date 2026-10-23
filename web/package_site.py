@@ -27,30 +27,13 @@ WANTED_FILES = ["index.html", "_headers"]
 WANTED_DIRS = ["js", "models"]
 
 
-RELEASES = "https://github.com/koderking25/clavinova-midi/releases"
+# Convertify has its own repository now, and its releases there are ordinary releases, so the
+# address that always means "the newest one" works again and nothing has to be filled in.
+CONVERTIFY = "https://github.com/koderking25/convertify/releases/latest"
 
 
 def convertify_link():
-    """Where "Get Convertify" should point when this site goes up.
-
-    Not GitHub's /releases/latest: that skips pre-releases, and Convertify ships as one, so
-    that address lands on a Midify release instead. Asking which Convertify release is newest
-    keeps the site right without anyone having to remember a number. If the question cannot be
-    answered, the releases page is a worse link but never a wrong one."""
-    try:
-        out = subprocess.run(["gh", "release", "list", "--limit", "60", "--json", "tagName"],
-                             capture_output=True, text=True, timeout=30, cwd=ROOT)
-        import json
-        tags = [r["tagName"] for r in json.loads(out.stdout or "[]")
-                if r["tagName"].startswith("convertify-v")]
-        if tags:
-            newest = max(tags, key=lambda t: [int(n) for n in
-                                              t.replace("convertify-v", "").split(".")])
-            return f"{RELEASES}/tag/{newest}"
-    except Exception as e:                                 # noqa: BLE001
-        print(f"could not ask which Convertify release is newest ({e}); "
-              f"pointing at the releases page instead")
-    return RELEASES
+    return CONVERTIFY
 
 
 def main():

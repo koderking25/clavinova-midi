@@ -31,7 +31,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-REPO = "koderking25/clavinova-midi"
+# Which repository's releases this app follows. Convertify used to live in Midify's repository
+# and its releases were marked pre-release so they would not become GitHub's "latest" and send
+# Midify the wrong file. It has its own repository now, so it sets UPDATE_REPO and goes back to
+# the simple path: one request for the newest release.
+REPO = os.environ.get("UPDATE_REPO", "koderking25/clavinova-midi")
 # Which app this updater is working for. Midify's values are the defaults, so nothing about
 # Midify changes; Convertify sets these in its launcher and gets the same update machinery.
 ASSET = os.environ.get("UPDATE_ASSET", "Midify.dmg")
